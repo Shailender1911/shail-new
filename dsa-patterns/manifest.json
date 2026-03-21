@@ -1,0 +1,192 @@
+{
+  "files": [
+    {
+      "path": "00-pattern-identification-guide.md",
+      "title": "DSA Pattern Identification Guide"
+    },
+    {
+      "path": "01-arrays-and-strings/01-two-pointers.md",
+      "title": "Pattern: Two Pointers"
+    },
+    {
+      "path": "01-arrays-and-strings/02-sliding-window.md",
+      "title": "Pattern: Sliding Window"
+    },
+    {
+      "path": "01-arrays-and-strings/03-prefix-sums.md",
+      "title": "Pattern: Prefix Sums"
+    },
+    {
+      "path": "01-arrays-and-strings/04-hashmaps-and-counting.md",
+      "title": "Pattern: Hashmaps and Counting"
+    },
+    {
+      "path": "01-arrays-and-strings/05-sorting-and-custom-comparators.md",
+      "title": "Pattern: Sorting and Custom Comparators"
+    },
+    {
+      "path": "01-arrays-and-strings/06-string-manipulation.md",
+      "title": "Pattern: String Manipulation"
+    },
+    {
+      "path": "01-arrays-and-strings/07-kadanes-algorithm.md",
+      "title": "Pattern: Kadane's Algorithm"
+    },
+    {
+      "path": "02-binary-search/01-classic-binary-search.md",
+      "title": "Pattern: Classic Binary Search"
+    },
+    {
+      "path": "02-binary-search/02-search-on-answer-space.md",
+      "title": "Pattern: Search on Answer Space"
+    },
+    {
+      "path": "02-binary-search/03-rotated-and-bitonic-arrays.md",
+      "title": "Pattern: Rotated and Bitonic Arrays"
+    },
+    {
+      "path": "03-linked-lists/01-fast-and-slow-pointers.md",
+      "title": "Pattern: Fast and Slow Pointers (Floyd's Tortoise and Hare)"
+    },
+    {
+      "path": "03-linked-lists/02-dummy-node-and-reversal.md",
+      "title": "Pattern: Dummy Node and In-Place Reversal"
+    },
+    {
+      "path": "03-linked-lists/03-merge-and-recursion.md",
+      "title": "Pattern: Merge and Recursion on Linked Lists"
+    },
+    {
+      "path": "04-stacks-and-queues/01-monotonic-stack.md",
+      "title": "Pattern: Monotonic Stack"
+    },
+    {
+      "path": "04-stacks-and-queues/02-monotonic-queue.md",
+      "title": "Pattern: Monotonic Queue (Deque)"
+    },
+    {
+      "path": "04-stacks-and-queues/03-stack-design-and-simulation.md",
+      "title": "Pattern: Stack Design and Simulation"
+    },
+    {
+      "path": "04-stacks-and-queues/04-parentheses-and-expressions.md",
+      "title": "Pattern: Parentheses and Expressions"
+    },
+    {
+      "path": "05-trees/01-tree-traversals-bfs-dfs.md",
+      "title": "Pattern: Tree Traversals — BFS & DFS"
+    },
+    {
+      "path": "05-trees/02-construction-and-serialization.md",
+      "title": "Pattern: Tree Construction & Serialization"
+    },
+    {
+      "path": "05-trees/03-path-sum-and-root-to-leaf.md",
+      "title": "Pattern: Path Sum & Root-to-Leaf Problems"
+    },
+    {
+      "path": "05-trees/04-bst-validation-and-properties.md",
+      "title": "Pattern: BST Validation & Properties"
+    },
+    {
+      "path": "05-trees/05-mirror-symmetry-and-inversion.md",
+      "title": "Pattern: Mirror, Symmetry & Inversion"
+    },
+    {
+      "path": "05-trees/06-lowest-common-ancestor.md",
+      "title": "Pattern: Lowest Common Ancestor (LCA)"
+    },
+    {
+      "path": "06-heaps-and-priority-queues/01-top-k-and-kth-element.md",
+      "title": "Pattern: Top-K and Kth Element"
+    },
+    {
+      "path": "06-heaps-and-priority-queues/02-merge-k-sorted.md",
+      "title": "Pattern: Merge K Sorted Sequences"
+    },
+    {
+      "path": "06-heaps-and-priority-queues/03-two-heaps-and-median.md",
+      "title": "Pattern: Two Heaps and Median Maintenance"
+    },
+    {
+      "path": "07-dynamic-programming/01-1d-dp-basics.md",
+      "title": "Pattern: 1D DP Basics (Linear Dynamic Programming)"
+    },
+    {
+      "path": "07-dynamic-programming/02-2d-dp-grid-and-lcs.md",
+      "title": "Pattern: 2D DP — Grids and Longest Common Subsequence"
+    },
+    {
+      "path": "07-dynamic-programming/03-knapsack-variants.md",
+      "title": "Pattern: Knapsack Variants (0/1, Unbounded, Subset Sum)"
+    },
+    {
+      "path": "07-dynamic-programming/04-interval-dp.md",
+      "title": "Pattern: Interval DP (Range DP)"
+    },
+    {
+      "path": "07-dynamic-programming/05-dp-on-strings.md",
+      "title": "Pattern: DP on Strings (Matching, Palindromes, Subsequences)"
+    },
+    {
+      "path": "07-dynamic-programming/06-dp-on-trees.md",
+      "title": "Pattern: DP on Trees (Post-Order Traversal DP)"
+    },
+    {
+      "path": "08-graphs/01-bfs-traversal.md",
+      "title": "Pattern: BFS Traversal (Graphs & Grids)"
+    },
+    {
+      "path": "08-graphs/02-dfs-traversal.md",
+      "title": "Pattern: DFS Traversal (Graphs & Grids)"
+    },
+    {
+      "path": "08-graphs/03-shortest-path-dijkstra-bellman.md",
+      "title": "Pattern: Shortest Path — Dijkstra & Bellman-Ford"
+    },
+    {
+      "path": "08-graphs/04-union-find.md",
+      "title": "Pattern: Union-Find (Disjoint Set Union)"
+    },
+    {
+      "path": "08-graphs/05-topological-sort.md",
+      "title": "Pattern: Topological Sort"
+    },
+    {
+      "path": "08-graphs/06-cycle-detection.md",
+      "title": "Pattern: Cycle Detection"
+    },
+    {
+      "path": "08-graphs/07-bipartite-check.md",
+      "title": "Pattern: Bipartite Check (Graph 2-Coloring)"
+    },
+    {
+      "path": "09-greedy/01-activity-selection-and-intervals.md",
+      "title": "Pattern: Activity Selection & Interval Greedy"
+    },
+    {
+      "path": "09-greedy/02-greedy-choice-property.md",
+      "title": "Pattern: Greedy Choice Property"
+    },
+    {
+      "path": "10-backtracking/01-subsets-and-combinations.md",
+      "title": "Pattern: Subsets & Combinations"
+    },
+    {
+      "path": "10-backtracking/02-permutations.md",
+      "title": "Pattern: Permutations"
+    },
+    {
+      "path": "10-backtracking/03-constraint-satisfaction.md",
+      "title": "Pattern: Constraint Satisfaction (Boards, Grids, Partitioning)"
+    },
+    {
+      "path": "11-intervals/01-merge-and-insert-intervals.md",
+      "title": "Pattern: Merge and Insert Intervals"
+    },
+    {
+      "path": "11-intervals/02-meeting-rooms.md",
+      "title": "Pattern: Meeting Rooms and Scheduling"
+    }
+  ]
+}

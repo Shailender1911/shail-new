@@ -13,6 +13,13 @@
 ```
 shail-new/
 ├── README.md                              # This file - overview and progress
+├── INDEX.md                               # Full index: all DSA pattern guides (GitHub + raw links)
+├── dsa-patterns/                          # 47 deep-dive pattern notes (identification, Java, problems)
+│   ├── manifest.json                      # Machine-readable list (titles + paths)
+│   ├── 00-pattern-identification-guide.md
+│   └── ... (11 categories, ~42 pattern files)
+├── apps/
+│   └── progress-tracker-HLD.md            # High-level design for the Progress Tracker web app
 ├── plans/
 │   └── 16-week-study-plan.md              # Complete week-by-week study plan
 ├── java/
@@ -40,6 +47,18 @@ shail-new/
 ---
 
 ## Quick Links to Study Materials
+
+### DSA pattern library (full notes — start here)
+
+| What | Link |
+|------|------|
+| **Master index** (all 47 guides: GitHub view + raw URLs) | [**INDEX.md**](INDEX.md) |
+| Identification guide + decision flow | [dsa-patterns/00-pattern-identification-guide.md](dsa-patterns/00-pattern-identification-guide.md) |
+| JSON manifest (for apps/scripts) | [dsa-patterns/manifest.json](dsa-patterns/manifest.json) |
+| Progress Tracker app — HLD | [apps/progress-tracker-HLD.md](apps/progress-tracker-HLD.md) |
+| **Progress Tracker** repo (Question Bank + in-app Pattern Guides) | [github.com/Shailender1911/progress-tracker](https://github.com/Shailender1911/progress-tracker) |
+
+---
 
 | Topic | File | Questions |
 |-------|------|-----------|
