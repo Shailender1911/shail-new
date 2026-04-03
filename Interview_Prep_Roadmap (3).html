@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interview Prep Roadmap — Shailender Kumar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0c0c10;
+  --paper: #f7f4ef;
+  --card: #ffffff;
+  --accent: #ff5c00;
+  --accent2: #1a3fff;
+  --accent3: #00b87a;
+  --accent4: #9c27b0;
+  --muted: #6b6860;
+  --border: #e4e0d8;
+  --mono: 'DM Mono', monospace;
+  --display: 'Syne', sans-serif;
+  --body: 'DM Sans', sans-serif;
+  --r: 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: var(--body); background: var(--paper); color: var(--ink); line-height: 1.6; font-size: 15px; }
+
+/* ── HERO ── */
+.hero {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 64px 48px 56px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 60% 80% at 85% 20%, rgba(255,92,0,0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 60% at 10% 90%, rgba(26,63,255,0.12) 0%, transparent 55%);
+  pointer-events: none;
+}
+.hero-grid { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: start; max-width: 1200px; position: relative; }
+.hero-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-bottom: 16px; }
+.hero h1 { font-family: var(--display); font-size: clamp(2.2rem, 5vw, 3.8rem); font-weight: 800; line-height: 1.1; margin-bottom: 20px; }
+.hero h1 span { color: var(--accent); }
+.hero-desc { font-size: 16px; color: rgba(247,244,239,0.65); max-width: 520px; line-height: 1.7; font-weight: 300; }
+.hero-stats { display: flex; gap: 32px; margin-top: 36px; flex-wrap: wrap; }
+.stat { }
+.stat-num { font-family: var(--display); font-size: 2.2rem; font-weight: 800; color: var(--accent); line-height: 1; }
+.stat-label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(247,244,239,0.5); margin-top: 4px; font-family: var(--mono); }
+.hero-meta { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 24px 28px; min-width: 240px; }
+.meta-row { display: flex; justify-content: space-between; gap: 20px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+.meta-row:last-child { border: none; padding-bottom: 0; }
+.meta-key { color: rgba(247,244,239,0.45); font-family: var(--mono); font-size: 11px; }
+.meta-val { color: var(--paper); font-weight: 500; font-size: 12px; text-align: right; }
+.hero-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.hbadge { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 20px; padding: 4px 12px; font-family: var(--mono); font-size: 11px; color: rgba(247,244,239,0.7); }
+
+/* ── NAV ── */
+.sticky-nav { position: sticky; top: 0; z-index: 100; background: rgba(247,244,239,0.96); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.nav-inner { max-width: 1200px; margin: 0 auto; display: flex; gap: 4px; padding: 0 32px; overflow-x: auto; }
+.nav-tab { font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; padding: 14px 16px; color: var(--muted); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; transition: all .2s; }
+.nav-tab:hover, .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── LAYOUT ── */
+.page { max-width: 1200px; margin: 0 auto; padding: 48px 32px; }
+.section { margin-bottom: 72px; }
+.section-header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; }
+.section-num { font-family: var(--mono); font-size: 12px; color: var(--accent); padding: 3px 10px; border: 1px solid var(--accent); border-radius: 4px; }
+.section-title { font-family: var(--display); font-size: 1.8rem; font-weight: 700; }
+.section-sub { color: var(--muted); font-size: 14px; margin-top: 6px; font-weight: 300; }
+
+/* ── STRATEGY ── */
+.strategy-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.strat-card { border-radius: var(--r); padding: 24px; border: 1px solid var(--border); background: var(--card); }
+.strat-card.layer1 { border-top: 3px solid var(--accent); }
+.strat-card.layer2 { border-top: 3px solid var(--accent2); }
+.strat-card.session { border-top: 3px solid var(--accent3); }
+.strat-label { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+.strat-card.layer1 .strat-label { color: var(--accent); }
+.strat-card.layer2 .strat-label { color: var(--accent2); }
+.strat-card.session .strat-label { color: var(--accent3); }
+.strat-title { font-family: var(--display); font-size: 1.05rem; font-weight: 700; margin-bottom: 10px; }
+.strat-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.strat-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.stag { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--paper); border: 1px solid var(--border); color: var(--muted); }
+
+/* ── TAG TYPES ── */
+.tag { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+.tag-new    { background: #fff1e6; color: #c44000; border: 1px solid #ffd4b0; }
+.tag-bridge { background: #e6f0ff; color: #1a3fff; border: 1px solid #b0c8ff; }
+.tag-ref    { background: #e6fff5; color: #007a50; border: 1px solid #a0f0d0; }
+.tag-easy   { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+.tag-medium { background: #fff8e1; color: #f57c00; border: 1px solid #ffcc80; }
+.tag-hard   { background: #fce4ec; color: #c62828; border: 1px solid #f48fb1; }
+.tag-gg9    { background: #ede7f6; color: #6a1b9a; border: 1px solid #ce93d8; }
+.tag-gg10   { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+.tag-gg11   { background: #fce4ec; color: #ad1457; border: 1px solid #f48fb1; }
+.tag-sql    { background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4; }
+
+/* ── WEEK SECTIONS ── */
+.week-block { margin-bottom: 48px; }
+.week-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding: 16px 20px; background: var(--ink); color: var(--paper); border-radius: var(--r); }
+.week-num { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.5; }
+.week-title { font-family: var(--display); font-size: 1.1rem; font-weight: 700; }
+.week-dates { font-family: var(--mono); font-size: 11px; opacity: 0.5; margin-left: auto; }
+
+.days-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.day-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; transition: box-shadow .2s; }
+.day-card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+.day-card-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px 12px; border-bottom: 1px solid var(--border); }
+.day-num-badge { font-family: var(--mono); font-size: 11px; background: var(--ink); color: var(--accent); padding: 3px 9px; border-radius: 5px; white-space: nowrap; }
+.day-date { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.day-dur { font-family: var(--mono); font-size: 10px; color: var(--paper); background: var(--muted); padding: 2px 7px; border-radius: 10px; margin-left: auto; }
+.day-card-body { padding: 16px 18px; }
+.day-topic { font-family: var(--display); font-size: 1rem; font-weight: 700; margin-bottom: 10px; }
+
+.day-questions { list-style: none; margin-bottom: 12px; }
+.day-questions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; line-height: 1.4; }
+.day-questions li:last-child { border: none; }
+.q-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex-shrink: 0; }
+
+.lc-box { background: var(--paper); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lc-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+.lc-name { font-family: var(--mono); font-size: 12px; color: var(--ink); font-weight: 500; }
+.lc-pattern { font-size: 11px; color: var(--muted); margin-left: auto; font-style: italic; }
+
+/* ── PROGRESS TABLE ── */
+.prog-table-wrap { overflow-x: auto; border-radius: var(--r); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: var(--ink); color: var(--paper); padding: 12px 16px; text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; white-space: nowrap; }
+tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+tbody tr:hover { background: #faf8f4; }
+tbody td { padding: 10px 16px; vertical-align: middle; }
+tbody td:first-child { font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.dot-easy   { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4caf50; margin-right: 6px; }
+.dot-medium { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ff9800; margin-right: 6px; }
+
+/* ── DAY FORMAT ── */
+.format-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.format-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.format-head { padding: 14px 20px; font-family: var(--display); font-size: 1rem; font-weight: 700; }
+.fc1 .format-head { background: #fff1e6; }
+.fc2 .format-head { background: #e6f0ff; }
+.fc3 .format-head { background: #e6fff5; }
+.fc4 .format-head { background: #f3e5f5; }
+.format-body { padding: 16px 20px; }
+.format-body ul { padding-left: 18px; }
+.format-body li { font-size: 13px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; }
+
+/* ── SESSION FORMAT ── */
+.session-flow { display: flex; flex-direction: column; gap: 0; }
+.session-step { display: flex; gap: 20px; }
+.step-line { display: flex; flex-direction: column; align-items: center; }
+.step-dot { width: 36px; height: 36px; border-radius: 50%; background: var(--ink); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 13px; font-weight: 500; flex-shrink: 0; }
+.step-connector { width: 2px; background: var(--border); flex: 1; min-height: 20px; }
+.step-body { padding: 4px 0 28px; }
+.step-title { font-family: var(--display); font-size: 0.95rem; font-weight: 700; margin-bottom: 5px; }
+.step-time { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+.step-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+/* ── REPO STRUCTURE ── */
+.repo-tree { background: var(--ink); border-radius: var(--r); padding: 28px 32px; font-family: var(--mono); font-size: 12.5px; line-height: 1.9; color: rgba(247,244,239,0.75); overflow-x: auto; }
+.tree-dir  { color: #6dd4e8; }
+.tree-file { color: rgba(247,244,239,0.55); }
+.tree-new  { color: #ff5c00; }
+.tree-comment { color: rgba(247,244,239,0.3); font-style: italic; }
+
+/* ── Q COVERAGE ── */
+.q-coverage { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.qc-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; }
+.qc-count { font-family: var(--display); font-size: 2rem; font-weight: 800; margin-bottom: 4px; }
+.qc-card:nth-child(1) .qc-count { color: var(--accent); }
+.qc-card:nth-child(2) .qc-count { color: var(--accent2); }
+.qc-card:nth-child(3) .qc-count { color: var(--accent3); }
+.qc-label { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.qc-desc { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+/* ── PROGRESS TRACKER ── */
+.tracker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.week-col { }
+.wk-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; text-align: center; }
+.day-pip { height: 28px; border-radius: 5px; background: var(--border); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 9px; color: var(--muted); margin-bottom: 5px; cursor: default; transition: background .2s; }
+.day-pip:hover { background: #e0ddd5; }
+.day-pip.w1 { border-left: 2px solid var(--accent); }
+.day-pip.w2 { border-left: 2px solid #e07000; }
+.day-pip.w3 { border-left: 2px solid var(--accent2); }
+.day-pip.w4 { border-left: 2px solid #7b1fa2; }
+.day-pip.w5 { border-left: 2px solid var(--accent3); }
+.day-pip.w6 { border-left: 2px solid #0288d1; }
+.day-pip.w7 { border-left: 2px solid #795548; }
+.day-pip.w8 { border-left: 2px solid #e91e63; }
+
+/* ── GAPS TABLE ── */
+.gaps-section { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.gap-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; }
+.gap-title { font-family: var(--display); font-size: 0.9rem; font-weight: 700; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+.gap-list { list-style: none; }
+.gap-list li { font-size: 12px; color: var(--muted); padding: 4px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: flex-start; gap: 6px; line-height: 1.4; }
+.gap-list li:last-child { border: none; }
+.gap-icon { flex-shrink: 0; font-size: 11px; }
+
+/* ── INFO BOX ── */
+.info-box { border-radius: var(--r); padding: 18px 22px; margin: 20px 0; display: flex; gap: 14px; align-items: flex-start; }
+.info-box.tip { background: #e6fff5; border: 1px solid #a0f0d0; }
+.info-box.warn { background: #fff8e1; border: 1px solid #ffe082; }
+.info-box.note { background: #e6f0ff; border: 1px solid #b0c8ff; }
+.info-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.info-text { font-size: 13px; line-height: 1.6; }
+.info-text strong { color: var(--ink); }
+
+/* ── FOOTER ── */
+footer { background: var(--ink); color: rgba(247,244,239,0.4); text-align: center; padding: 32px; font-family: var(--mono); font-size: 11px; letter-spacing: 1px; }
+
+/* ── MISC ── */
+code { font-family: var(--mono); font-size: 11.5px; background: #f0ede7; color: var(--accent); padding: 1px 5px; border-radius: 3px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.divider { width: 40px; height: 3px; background: var(--accent); border-radius: 2px; margin: 12px 0 18px; }
+
+@media (max-width: 900px) {
+  .hero { padding: 40px 24px 36px; }
+  .hero-grid { grid-template-columns: 1fr; }
+  .hero-meta { display: none; }
+  .days-grid, .format-grid, .q-coverage, .strategy-grid, .gaps-section { grid-template-columns: 1fr; }
+  .tracker-grid { grid-template-columns: repeat(4, 1fr); }
+  .page { padding: 32px 20px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero">
+  <div class="hero-grid">
+    <div>
+      <div class="hero-eyebrow">Interview Prep Roadmap · 2026</div>
+      <h1>32 Days to<br><span>SSE Readiness</span></h1>
+      <p class="hero-desc">A structured 8-week partner-interview program covering Java Core, Spring Boot, SQL, Design Patterns, Microservices and DSA — built on top of the <code style="background:rgba(255,255,255,0.1);color:#ffa070">shail-new</code> repo.</p>
+      <div class="hero-stats">
+        <div class="stat"><div class="stat-num">32</div><div class="stat-label">Sessions</div></div>
+        <div class="stat"><div class="stat-num">50+</div><div class="stat-label">GG Questions</div></div>
+        <div class="stat"><div class="stat-num">32</div><div class="stat-label">LeetCode</div></div>
+        <div class="stat"><div class="stat-num">8</div><div class="stat-label">Weeks</div></div>
+      </div>
+      <div class="hero-badges">
+        <span class="hbadge">GG9</span><span class="hbadge">GG10</span><span class="hbadge">GG11</span>
+        <span class="hbadge">Java Core</span><span class="hbadge">Java 8</span><span class="hbadge">Spring Boot</span>
+        <span class="hbadge">SQL</span><span class="hbadge">Microservices</span><span class="hbadge">SOLID</span><span class="hbadge">DSA</span>
+      </div>
+    </div>
+    <div class="hero-meta">
+      <div class="meta-row"><span class="meta-key">Start Date</span><span class="meta-val">Sat, Mar 28</span></div>
+      <div class="meta-row"><span class="meta-key">End Date</span><span class="meta-val">Thu, May 22</span></div>
+      <div class="meta-row"><span class="meta-key">Sat+Sun</span><span class="meta-val">60 min / session</span></div>
+      <div class="meta-row"><span class="meta-key">Tue / Thu</span><span class="meta-val">45 min / session</span></div>
+      <div class="meta-row"><span class="meta-key">Format</span><span class="meta-val">Partner Interview</span></div>
+      <div class="meta-row"><span class="meta-key">Repo</span><span class="meta-val">shail-new (public)</span></div>
+      <div class="meta-row"><span class="meta-key">Output</span><span class="meta-val">Interview-Prep-Roadmap/</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ STICKY NAV ═══ -->
+<nav class="sticky-nav">
+  <div class="nav-inner">
+    <a class="nav-tab" href="#strategy">Strategy</a>
+    <a class="nav-tab" href="#gaps">Gaps</a>
+    <a class="nav-tab" href="#structure">Folder</a>
+    <a class="nav-tab" href="#schedule">Schedule</a>
+    <a class="nav-tab" href="#week1">Wk 1</a>
+    <a class="nav-tab" href="#week2">Wk 2</a>
+    <a class="nav-tab" href="#week3">Wk 3</a>
+    <a class="nav-tab" href="#week4">Wk 4</a>
+    <a class="nav-tab" href="#week5">Wk 5</a>
+    <a class="nav-tab" href="#week6">Wk 6</a>
+    <a class="nav-tab" href="#week7">Wk 7</a>
+    <a class="nav-tab" href="#week8">Wk 8</a>
+    <a class="nav-tab" href="#leetcode">LeetCode</a>
+    <a class="nav-tab" href="#format">Day Format</a>
+    <a class="nav-tab" href="#session">Session Flow</a>
+  </div>
+</nav>
+
+<div class="page">
+
+<!-- ═══ STRATEGY ═══ -->
+<section class="section" id="strategy">
+  <div class="section-header">
+    <span class="section-num">01</span>
+    <div>
+      <div class="section-title">Two-Layer Strategy</div>
+      <div class="section-sub">Build on what exists — fill the gaps — connect the dots</div>
+    </div>
+  </div>
+  <div class="strategy-grid">
+    <div class="strat-card layer1">
+      <div class="strat-label">Layer 1 — This Roadmap</div>
+      <div class="strat-title">Beginner-Friendly Q&A + Coding</div>
+      <div class="strat-desc">Day files covering all GG9/GG10/GG11 questions with concise, example-driven answers written for someone being interviewed. 1 LeetCode problem per day, mapped to the topic.</div>
+      <div class="strat-tags">
+        <span class="stag">~20 NEW questions</span>
+        <span class="stag">~15 BRIDGE questions</span>
+        <span class="stag">~15 REF questions</span>
+        <span class="stag">32 LeetCode</span>
+      </div>
+    </div>
+    <div class="strat-card layer2">
+      <div class="strat-label">Layer 2 — shail-new Repo</div>
+      <div class="strat-title">Deep-Dive Reference Material</div>
+      <div class="strat-desc">The existing repo has 36 core QAs, 32 advanced QAs, 31 Spring Boot QAs, 23 JPA QAs, 23 SQL QAs, 13 design patterns, and 47 DSA pattern guides — all linked from each day file.</div>
+      <div class="strat-tags">
+        <span class="stag">core-qa.md</span>
+        <span class="stag">advanced-qa.md</span>
+        <span class="stag">spring-boot-qa.md</span>
+        <span class="stag">sql-qa.md</span>
+        <span class="stag">design-patterns.md</span>
+      </div>
+    </div>
+    <div class="strat-card session">
+      <div class="strat-label">Layer 3 — Partner Sessions</div>
+      <div class="strat-title">Friend-Led Interview Practice</div>
+      <div class="strat-desc">Your friend takes on the interviewer role every session. Each file is structured for them to lead — questions to ask, what good answers look like, how to probe deeper, and coding review.</div>
+      <div class="strat-tags">
+        <span class="stag">Recap Quiz (5 min)</span>
+        <span class="stag">Interview Q&A (30 min)</span>
+        <span class="stag">Coding on paper (15 min)</span>
+        <span class="stag">Confidence rating</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-box note" style="margin-top:20px;">
+    <span class="info-icon">ℹ</span>
+    <span class="info-text"><strong>Question types:</strong> <span class="tag tag-new">NEW</span> = beginner content created fresh. <span class="tag tag-bridge">BRIDGE</span> = exists in shail-new but needs simpler entry point. <span class="tag tag-ref">REF</span> = fully covered in shail-new, we link with a brief summary.</span>
+  </div>
+
+  <div style="margin-top:24px;">
+    <div class="q-coverage">
+      <div class="qc-card">
+        <div class="qc-count">~20</div>
+        <div class="qc-label">NEW Questions</div>
+        <div class="qc-desc">Beginner Java fundamentals, basic SQL, all microservices content, RESTful basics, messaging patterns — absent from shail-new</div>
+      </div>
+      <div class="qc-card">
+        <div class="qc-count">~15</div>
+        <div class="qc-label">BRIDGE Questions</div>
+        <div class="qc-desc">Topics covered in shail-new at intermediate/advanced level but needing a simpler, beginner-friendly entry point first</div>
+      </div>
+      <div class="qc-card">
+        <div class="qc-count">~15</div>
+        <div class="qc-label">REF Questions</div>
+        <div class="qc-desc">Fully covered in shail-new — these days provide a quick summary and direct link with "go deeper" pointers</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ GAPS ═══ -->
+<section class="section" id="gaps">
+  <div class="section-header">
+    <span class="section-num">02</span>
+    <div>
+      <div class="section-title">What shail-new Is Missing</div>
+      <div class="section-sub">These are the gaps this roadmap fills — topics not covered or too advanced in the existing repo</div>
+    </div>
+  </div>
+  <div class="gaps-section">
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:var(--accent);">☕ Beginner Java Fundamentals</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>JVM vs JRE vs JDK distinction</li>
+        <li><span class="gap-icon">·</span>Platform independence (WORA)</li>
+        <li><span class="gap-icon">·</span>Keywords in <code>public static void main</code></li>
+        <li><span class="gap-icon">·</span>Wrapper classes with examples</li>
+        <li><span class="gap-icon">·</span>Class vs Object concept</li>
+        <li><span class="gap-icon">·</span><code>&gt;&gt;</code> vs <code>&gt;&gt;&gt;</code> operators</li>
+        <li><span class="gap-icon">·</span>Default constructor purpose</li>
+        <li><span class="gap-icon">·</span>Private constructor use cases</li>
+      </ul>
+    </div>
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:var(--accent2);">🗃 Basic SQL</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>Database schema concept</li>
+        <li><span class="gap-icon">·</span>DDL vs DML difference</li>
+        <li><span class="gap-icon">·</span>Primary key vs Foreign key</li>
+        <li><span class="gap-icon">·</span>Normalization (1NF, 2NF, 3NF)</li>
+        <li><span class="gap-icon">·</span>Subqueries vs JOINs for beginners</li>
+        <li><span class="gap-icon">·</span>GROUP BY / HAVING walkthrough</li>
+      </ul>
+    </div>
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:var(--accent3);">🔗 Microservices (All NEW)</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>What is a microservice?</li>
+        <li><span class="gap-icon">·</span>Can we always implement it?</li>
+        <li><span class="gap-icon">·</span>Drawbacks of microservices</li>
+        <li><span class="gap-icon">·</span>Push-pull messaging pattern</li>
+        <li><span class="gap-icon">·</span>Pub-sub messaging pattern</li>
+        <li><span class="gap-icon">·</span>Kafka vs RabbitMQ comparison</li>
+        <li><span class="gap-icon">·</span>Event-driven architecture</li>
+        <li><span class="gap-icon">·</span>Async in Java + Spring @Async</li>
+      </ul>
+    </div>
+  </div>
+  <div class="gaps-section" style="margin-top:14px;">
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:#9c27b0;">🌱 Spring Boot Basics</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>RESTful concepts (all 6 constraints)</li>
+        <li><span class="gap-icon">·</span>@Controller vs @RestController</li>
+        <li><span class="gap-icon">·</span>JWT basics walkthrough</li>
+        <li><span class="gap-icon">·</span>Day-wise interview structure format</li>
+      </ul>
+    </div>
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:#0288d1;">🎯 Session Structure</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>Day-wise partner interview format</li>
+        <li><span class="gap-icon">·</span>LeetCode problems per day (mapped)</li>
+        <li><span class="gap-icon">·</span>Confidence rating system</li>
+        <li><span class="gap-icon">·</span>Progress tracker in SCHEDULE.md</li>
+      </ul>
+    </div>
+    <div class="gap-card">
+      <div class="gap-title" style="border-color:#795548;">📚 Java 8 Entry Points</div>
+      <ul class="gap-list">
+        <li><span class="gap-icon">·</span>Rewriting anon classes as lambdas</li>
+        <li><span class="gap-icon">·</span>Beginner Stream examples (employees)</li>
+        <li><span class="gap-icon">·</span>java.time API walkthrough</li>
+        <li><span class="gap-icon">·</span>Optional anti-patterns (beginner)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FOLDER STRUCTURE ═══ -->
+<section class="section" id="structure">
+  <div class="section-header">
+    <span class="section-num">03</span>
+    <div>
+      <div class="section-title">Output Folder Structure</div>
+      <div class="section-sub"><code>C:\Users\kumar\Desktop\Interview-Prep-Roadmap\</code> — 34 total files (32 day files + README + SCHEDULE)</div>
+    </div>
+  </div>
+  <div class="repo-tree">
+<span class="tree-dir">Interview-Prep-Roadmap/</span>
+├── <span class="tree-new">README.md</span>                               <span class="tree-comment"># Overview, cross-references, ground rules</span>
+├── <span class="tree-new">SCHEDULE.md</span>                             <span class="tree-comment"># Full 8-week calendar + progress tracker</span>
+│
+├── <span class="tree-dir">Week-01-Java-Core/</span>
+│   ├── <span class="tree-new">Day-01-Java-Platform-Basics.md</span>        <span class="tree-comment"># Sat Mar 28, 1hr</span>
+│   ├── <span class="tree-new">Day-02-OOP-Fundamentals.md</span>            <span class="tree-comment"># Sun Mar 29, 1hr</span>
+│   ├── <span class="tree-new">Day-03-Inheritance-Polymorphism.md</span>    <span class="tree-comment"># Tue Mar 31, 45min</span>
+│   └── <span class="tree-new">Day-04-Constructors-Operators.md</span>      <span class="tree-comment"># Thu Apr 2, 45min</span>
+│
+├── <span class="tree-dir">Week-02-Memory-Strings-Errors/</span>
+│   ├── <span class="tree-new">Day-05-Memory-Management.md</span>           <span class="tree-comment"># Sat Apr 5, 1hr</span>
+│   ├── <span class="tree-new">Day-06-GC-Exceptions.md</span>               <span class="tree-comment"># Sun Apr 6, 1hr</span>
+│   ├── <span class="tree-new">Day-07-Strings-Deep-Dive.md</span>           <span class="tree-comment"># Tue Apr 8, 45min</span>
+│   └── <span class="tree-new">Day-08-Multithreading.md</span>              <span class="tree-comment"># Thu Apr 10, 45min</span>
+│
+├── <span class="tree-dir">Week-03-Collections-DataStructures/</span>
+│   ├── <span class="tree-new">Day-09-Collections-HashMap.md</span>         <span class="tree-comment"># Sat Apr 12, 1hr</span>
+│   ├── <span class="tree-new">Day-10-Queue-Stack-Deque.md</span>           <span class="tree-comment"># Sun Apr 13, 1hr</span>
+│   ├── <span class="tree-new">Day-11-Hashing-Iterators.md</span>           <span class="tree-comment"># Tue Apr 15, 45min</span>
+│   └── <span class="tree-new">Day-12-Choosing-Right-DS.md</span>           <span class="tree-comment"># Thu Apr 17, 45min</span>
+│
+├── <span class="tree-dir">Week-04-Java8/</span>
+│   ├── <span class="tree-new">Day-13-Lambda-FunctionalInterfaces.md</span> <span class="tree-comment"># Sat Apr 19, 1hr</span>
+│   ├── <span class="tree-new">Day-14-Streams-Optional.md</span>            <span class="tree-comment"># Sun Apr 20, 1hr</span>
+│   ├── <span class="tree-new">Day-15-Default-Static-DateTime.md</span>    <span class="tree-comment"># Tue Apr 22, 45min</span>
+│   └── <span class="tree-new">Day-16-Java8-Practice-Review.md</span>      <span class="tree-comment"># Thu Apr 24, 45min</span>
+│
+├── <span class="tree-dir">Week-05-SQL/</span>
+│   ├── <span class="tree-new">Day-17-SQL-Basics-DDL-DML.md</span>         <span class="tree-comment"># Sat Apr 26, 1hr</span>
+│   ├── <span class="tree-new">Day-18-Joins-Subqueries.md</span>            <span class="tree-comment"># Sun Apr 27, 1hr</span>
+│   ├── <span class="tree-new">Day-19-Normalization-Aggregation.md</span>  <span class="tree-comment"># Tue Apr 29, 45min</span>
+│   └── <span class="tree-new">Day-20-SQL-Practice.md</span>               <span class="tree-comment"># Thu May 1, 45min</span>
+│
+├── <span class="tree-dir">Week-06-SpringBoot/</span>
+│   ├── <span class="tree-new">Day-21-SpringBoot-Basics-DI.md</span>       <span class="tree-comment"># Sat May 3, 1hr</span>
+│   ├── <span class="tree-new">Day-22-REST-Controllers-Profiles.md</span>  <span class="tree-comment"># Sun May 4, 1hr</span>
+│   ├── <span class="tree-new">Day-23-Actuator-Config.md</span>            <span class="tree-comment"># Tue May 6, 45min</span>
+│   └── <span class="tree-new">Day-24-Security.md</span>                   <span class="tree-comment"># Thu May 8, 45min</span>
+│
+├── <span class="tree-dir">Week-07-SOLID-DesignPatterns/</span>
+│   ├── <span class="tree-new">Day-25-SOLID-Principles.md</span>           <span class="tree-comment"># Sat May 10, 1hr</span>
+│   ├── <span class="tree-new">Day-26-Creational-Patterns.md</span>        <span class="tree-comment"># Sun May 11, 1hr</span>
+│   ├── <span class="tree-new">Day-27-Structural-Patterns.md</span>        <span class="tree-comment"># Tue May 13, 45min</span>
+│   └── <span class="tree-new">Day-28-Behavioral-Patterns.md</span>        <span class="tree-comment"># Thu May 15, 45min</span>
+│
+└── <span class="tree-dir">Week-08-Microservices/</span>
+    ├── <span class="tree-new">Day-29-Microservices-Intro.md</span>        <span class="tree-comment"># Sat May 17, 1hr</span>
+    ├── <span class="tree-new">Day-30-Messaging-PushPull-PubSub.md</span> <span class="tree-comment"># Sun May 18, 1hr</span>
+    ├── <span class="tree-new">Day-31-Async-EventDriven.md</span>          <span class="tree-comment"># Tue May 20, 45min</span>
+    └── <span class="tree-new">Day-32-Review-Mock-Interview.md</span>     <span class="tree-comment"># Thu May 22, 45min</span>
+  </div>
+</section>
+
+<!-- ═══ SCHEDULE OVERVIEW ═══ -->
+<section class="section" id="schedule">
+  <div class="section-header">
+    <span class="section-num">04</span>
+    <div>
+      <div class="section-title">Full 32-Day Calendar</div>
+      <div class="section-sub">Mar 28 → May 22 · Sat + Sun (60 min) · Tue + Thu (45 min)</div>
+    </div>
+  </div>
+
+  <div class="tracker-grid">
+    <div class="week-col">
+      <div class="wk-label">Wk 1 · Java Core</div>
+      <div class="day-pip w1">D1 Sat</div>
+      <div class="day-pip w1">D2 Sun</div>
+      <div class="day-pip w1">D3 Tue</div>
+      <div class="day-pip w1">D4 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 2 · Memory</div>
+      <div class="day-pip w2">D5 Sat</div>
+      <div class="day-pip w2">D6 Sun</div>
+      <div class="day-pip w2">D7 Tue</div>
+      <div class="day-pip w2">D8 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 3 · Collections</div>
+      <div class="day-pip w3">D9 Sat</div>
+      <div class="day-pip w3">D10 Sun</div>
+      <div class="day-pip w3">D11 Tue</div>
+      <div class="day-pip w3">D12 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 4 · Java 8</div>
+      <div class="day-pip w4">D13 Sat</div>
+      <div class="day-pip w4">D14 Sun</div>
+      <div class="day-pip w4">D15 Tue</div>
+      <div class="day-pip w4">D16 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 5 · SQL</div>
+      <div class="day-pip w5">D17 Sat</div>
+      <div class="day-pip w5">D18 Sun</div>
+      <div class="day-pip w5">D19 Tue</div>
+      <div class="day-pip w5">D20 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 6 · Spring</div>
+      <div class="day-pip w6">D21 Sat</div>
+      <div class="day-pip w6">D22 Sun</div>
+      <div class="day-pip w6">D23 Tue</div>
+      <div class="day-pip w6">D24 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 7 · Patterns</div>
+      <div class="day-pip w7">D25 Sat</div>
+      <div class="day-pip w7">D26 Sun</div>
+      <div class="day-pip w7">D27 Tue</div>
+      <div class="day-pip w7">D28 Thu</div>
+    </div>
+    <div class="week-col">
+      <div class="wk-label">Wk 8 · Microsvcs</div>
+      <div class="day-pip w8">D29 Sat</div>
+      <div class="day-pip w8">D30 Sun</div>
+      <div class="day-pip w8">D31 Tue</div>
+      <div class="day-pip w8">D32 Thu</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 1 ═══ -->
+<section class="section" id="week1">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 01</span>
+      <span class="week-title">☕ Java Core</span>
+      <span class="week-dates">Mar 28 – Apr 2</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head">
+          <span class="day-num-badge">Day 01</span>
+          <span class="day-date">Sat, Mar 28</span>
+          <span class="day-dur">60 min</span>
+        </div>
+        <div class="day-card-body">
+          <div class="day-topic">Java Platform Basics</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Difference between JVM, JRE, JDK <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Java is platform independent — what does that mean? <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Explain all keywords: <code>public static void main(String[] args)</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> What are Wrapper classes with examples <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#1 · Two Sum</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">HashMap — intro to Java collections</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head">
+          <span class="day-num-badge">Day 02</span>
+          <span class="day-date">Sun, Mar 29</span>
+          <span class="day-dur">60 min</span>
+        </div>
+        <div class="day-card-body">
+          <div class="day-topic">OOP Fundamentals</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Difference between Class and Object <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Abstraction vs Encapsulation → <code>core-qa Q1</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Inheritance vs Abstract class → <code>core-qa Q3</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#217 · Contains Duplicate</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">HashSet — OOP thinking</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head">
+          <span class="day-num-badge">Day 03</span>
+          <span class="day-date">Tue, Mar 31</span>
+          <span class="day-dur">45 min</span>
+        </div>
+        <div class="day-card-body">
+          <div class="day-topic">Inheritance &amp; Polymorphism</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Overloading vs Overriding + use cases → <code>core-qa Q2, Q35</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Multiple inheritance — is it supported? → <code>core-qa Q4</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Can we override private methods? → <code>core-qa Q35</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#242 · Valid Anagram</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Frequency Count / HashMap</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head">
+          <span class="day-num-badge">Day 04</span>
+          <span class="day-date">Thu, Apr 2</span>
+          <span class="day-dur">45 min</span>
+        </div>
+        <div class="day-card-body">
+          <div class="day-topic">Constructors &amp; Operators</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Purpose of a default constructor <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Where and how to use a private constructor <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Difference between <code>&gt;&gt;</code> and <code>&gt;&gt;&gt;</code> operators <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#344 · Reverse String</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Two Pointers — arrays</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 2 ═══ -->
+<section class="section" id="week2">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 02</span>
+      <span class="week-title">🧵 Memory, Strings &amp; Error Handling</span>
+      <span class="week-dates">Apr 5 – Apr 10</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 05</span><span class="day-date">Sat, Apr 5</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Memory Management</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Heap vs Stack memory differences → <code>advanced-qa Q12</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> On which memory are arrays created? <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> How String is initialized — String Pool → <code>core-qa Q12, Q13</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#26 · Remove Duplicates from Sorted Array</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Two Pointers — in-place</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 06</span><span class="day-date">Sun, Apr 6</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">GC &amp; Exceptions</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Why is Garbage Collection necessary? → <code>advanced-qa Q14</code> <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> final vs finally vs finalize → <code>core-qa Q33</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Error vs Exception → <code>core-qa Q16</code> <span class="tag tag-gg9">GG9</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#20 · Valid Parentheses</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Stack — exception-thinking</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 07</span><span class="day-date">Tue, Apr 8</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Strings Deep Dive</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Program to reverse a String — discuss approaches <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> String immutability, StringBuilder vs StringBuffer → <code>core-qa Q13, Q14</code></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#125 · Valid Palindrome</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Two Pointers on Strings</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 08</span><span class="day-date">Thu, Apr 10</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Multithreading</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Multithreading — ways to achieve it → <code>advanced-qa Q1, Q2</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> What is a daemon thread? Can main() be a daemon? <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> synchronized keyword + limitations → <code>advanced-qa Q3</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#206 · Reverse Linked List</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Linked List fundamentals</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 3 ═══ -->
+<section class="section" id="week3">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 03</span>
+      <span class="week-title">🗺 Collections &amp; Data Structures</span>
+      <span class="week-dates">Apr 12 – Apr 17</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 09</span><span class="day-date">Sat, Apr 12</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Collections &amp; HashMap</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Difference between Array and Collection <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Collections in Java + internal working of HashMap → <code>core-qa Q5</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> How to fetch specific data from HashMap using key <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#49 · Group Anagrams</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">HashMap heavy usage</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 10</span><span class="day-date">Sun, Apr 13</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Queue, Stack &amp; Deque</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Different operations available in Queue <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Differentiate between Queue and Deque <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> 🔴 <strong>Implement Stack using Queues</strong> — full code <span class="tag tag-gg11">GG11</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#232 · Implement Queue using Stacks</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Stack/Queue — mirrors GG11 question</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 11</span><span class="day-date">Tue, Apr 15</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Hashing &amp; Iterators</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> What is a hash function? How does it work? <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> FailFast vs FailSafe iterators → <code>core-qa Q10</code> <span class="tag tag-gg9">GG9</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#387 · First Unique Character in a String</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">HashMap — hashing in practice</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 12</span><span class="day-date">Thu, Apr 17</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Choosing the Right Data Structure</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Read-heavy scenario — which DS and why? <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> ConcurrentHashMap internals → <code>core-qa Q6</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> ArrayList vs LinkedList → <code>core-qa Q7</code></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#146 · LRU Cache</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">HashMap + DoublyLinkedList design</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 4 ═══ -->
+<section class="section" id="week4">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 04</span>
+      <span class="week-title">🌟 Java 8 Features</span>
+      <span class="week-dates">Apr 19 – Apr 24</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 13</span><span class="day-date">Sat, Apr 19</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Lambda &amp; Functional Interfaces</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Features of Java 8 → <code>advanced-qa Q18–Q23</code> <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Lambda expressions, Functional Interfaces → <code>advanced-qa Q20, Q22</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Beginner walkthrough — rewriting anonymous classes as lambdas</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#56 · Merge Intervals</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Comparator lambda for sorting</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 14</span><span class="day-date">Sun, Apr 20</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Streams &amp; Optional</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Streams — map, flatMap, reduce, groupingBy → <code>advanced-qa Q18</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Optional usage and anti-patterns → <code>advanced-qa Q21</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Beginner examples — filter employees, group by department</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#347 · Top K Frequent Elements</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Streams + Heap or Bucket sort</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 15</span><span class="day-date">Tue, Apr 22</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Default/Static Methods &amp; DateTime</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Default methods in interfaces → <code>advanced-qa Q23</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> java.time API — LocalDate, LocalDateTime, Period, Duration</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#238 · Product of Array Except Self</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Prefix/Suffix arrays</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 16</span><span class="day-date">Thu, Apr 24</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Java 8 Practice &amp; Review</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span>10 rapid-fire questions spanning Weeks 1–4</span></li>
+            <li><span class="q-dot"></span><span>Solve 3 problems using Streams, Optional, Lambda</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#3 · Longest Substring Without Repeating Chars</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Sliding Window + HashMap</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 5 ═══ -->
+<section class="section" id="week5">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 05</span>
+      <span class="week-title">🗃 SQL</span>
+      <span class="week-dates">Apr 26 – May 1</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 17</span><span class="day-date">Sat, Apr 26</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">SQL Basics — DDL &amp; DML</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Concept of a database schema <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Difference between DDL and DML <span class="tag tag-gg9">GG9/10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Primary key vs Foreign key <span class="tag tag-gg9">GG9/10</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode SQL</span>
+            <span class="lc-name">#175 · Combine Two Tables</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Basic LEFT JOIN</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 18</span><span class="day-date">Sun, Apr 27</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Joins &amp; Subqueries</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> All JOIN types — INNER, LEFT, RIGHT, FULL, CROSS, SELF → <code>sql-qa Q1–Q7</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Subqueries vs JOINs with beginner examples</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode SQL</span>
+            <span class="lc-name">#181 · Employees Earning More Than Managers</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Self Join</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 19</span><span class="day-date">Tue, Apr 29</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Normalization &amp; Aggregation</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Normalization — 1NF, 2NF, 3NF with examples</span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> GROUP BY, HAVING, COUNT, SUM, AVG walkthrough</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode SQL</span>
+            <span class="lc-name">#184 · Department Highest Salary</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">GROUP BY + Subquery</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 20</span><span class="day-date">Thu, May 1</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Indexing &amp; Practice</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> B-tree indexing, Clustered vs Non-clustered → <code>sql-qa Q8–Q13</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> 2nd highest salary, duplicates, running total → <code>sql-qa Practice</code></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode SQL</span>
+            <span class="lc-name">#178 · Rank Scores</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Window Functions</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 6 ═══ -->
+<section class="section" id="week6">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 06</span>
+      <span class="week-title">🌱 Spring Boot</span>
+      <span class="week-dates">May 3 – May 8</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 21</span><span class="day-date">Sat, May 3</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Spring Boot Basics &amp; DI</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Features of Spring Boot → <code>spring-boot-qa Q9</code> <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> @SpringBootApplication internally → <code>spring-boot-qa Q9</code> <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Dependency Injection — types → <code>spring-boot-qa Q1, Q2</code> <span class="tag tag-gg9">GG9</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#706 · Design HashMap</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Design problem — Spring context</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 22</span><span class="day-date">Sun, May 4</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">REST, Controllers &amp; Profiles</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> What does RESTful mean? (6 constraints) <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> @Controller vs @RestController <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Profiles in Spring → <code>spring-boot-qa Q11</code> <span class="tag tag-gg11">GG11</span></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#704 · Binary Search</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Binary Search — fundamental</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 23</span><span class="day-date">Tue, May 6</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Actuator &amp; Configuration</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Spring Boot Actuator → <code>spring-boot-qa Q13</code> <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Bean lifecycle, @ConfigurationProperties → <code>spring-boot-qa Q3, Q12</code></span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#15 · 3Sum</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Two Pointers + Sorting</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 24</span><span class="day-date">Thu, May 8</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Security</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-bridge">BRIDGE</span> Security in Spring app → <code>spring-boot-qa Q15–Q20</code> <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> JWT basics walkthrough with beginner-friendly diagram</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#33 · Search in Rotated Sorted Array</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Binary Search variation</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 7 ═══ -->
+<section class="section" id="week7">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 07</span>
+      <span class="week-title">🏗 SOLID &amp; Design Patterns</span>
+      <span class="week-dates">May 10 – May 15</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 25</span><span class="day-date">Sat, May 10</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">SOLID Principles</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> SOLID Design Principles → <code>design-patterns/solid-principles.md</code> <span class="tag tag-gg10">GG10</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Beginner summary with simple real-world analogies (not lending domain)</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#155 · Min Stack</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Stack design with constraints</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 26</span><span class="day-date">Sun, May 11</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Creational Patterns</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Types of design patterns → <code>design-patterns/design-patterns.md</code> <span class="tag tag-gg10">GG10/11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Singleton, Factory, Builder — beginner walkthrough with simple examples</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#225 · Implement Stack using Queues</span>
+            <span class="tag tag-easy">Easy</span>
+            <span class="lc-pattern">Direct GG11 question as code</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 27</span><span class="day-date">Tue, May 13</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Structural Patterns</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Adapter, Decorator, Proxy, Facade → <code>design-patterns.md</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> When to pick which structural pattern — decision flowchart</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#2 · Add Two Numbers</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Linked List manipulation</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 28</span><span class="day-date">Thu, May 15</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Behavioral Patterns</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> Strategy, Observer, Template Method, State, Command → <code>design-patterns.md</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Patterns in Spring: <code>@EventListener</code>=Observer, <code>@Transactional</code>=Proxy</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#53 · Maximum Subarray</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Kadane's Algorithm / DP intro</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WEEK 8 ═══ -->
+<section class="section" id="week8">
+  <div class="week-block">
+    <div class="week-header">
+      <span class="week-num">Week 08</span>
+      <span class="week-title">🔗 Microservices</span>
+      <span class="week-dates">May 17 – May 22</span>
+    </div>
+    <div class="days-grid">
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 29</span><span class="day-date">Sat, May 17</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Microservices Introduction</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> What is a microservice? Can we always implement it? <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Drawbacks of implementing microservices <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Monolith vs Microservices — real-world comparison</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#622 · Design Circular Queue</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Queue design — messaging context</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 30</span><span class="day-date">Sun, May 18</span><span class="day-dur">60 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Messaging — Push-Pull &amp; Pub-Sub</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Push-pull messaging — how it works + example <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Pub-sub messaging — how it works + example <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Kafka vs RabbitMQ for beginners</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#621 · Task Scheduler</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Greedy / Queue — scheduling</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card">
+        <div class="day-card-head"><span class="day-num-badge">Day 31</span><span class="day-date">Tue, May 20</span><span class="day-dur">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic">Async &amp; Event-Driven</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> How to achieve async in Java? <span class="tag tag-gg11">GG11</span></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-ref">REF</span> @Async in Spring → <code>spring-boot-qa Q21</code></span></li>
+            <li><span class="q-dot"></span><span><span class="tag tag-new">NEW</span> Event-driven architecture overview with diagram</span></li>
+          </ul>
+          <div class="lc-box">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#200 · Number of Islands</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">BFS/DFS — distributed thinking</span>
+          </div>
+        </div>
+      </div>
+      <div class="day-card" style="border: 2px solid var(--accent);">
+        <div class="day-card-head" style="background:#fff8f5;"><span class="day-num-badge" style="background:var(--accent);color:white;">Day 32</span><span class="day-date">Thu, May 22</span><span class="day-dur" style="background:var(--accent);">45 min</span></div>
+        <div class="day-card-body">
+          <div class="day-topic" style="color:var(--accent);">🏁 Mock Interview &amp; Review</div>
+          <ul class="day-questions">
+            <li><span class="q-dot"></span><span>15 rapid-fire questions — one per topic (Days 1–31)</span></li>
+            <li><span class="q-dot"></span><span>Full mock interview simulation guide for your friend</span></li>
+            <li><span class="q-dot"></span><span>Review checklist — revisit based on weak areas in SCHEDULE.md</span></li>
+          </ul>
+          <div class="lc-box" style="border-color:var(--accent);">
+            <span class="lc-label">LeetCode</span>
+            <span class="lc-name">#322 · Coin Change</span>
+            <span class="tag tag-medium">Medium</span>
+            <span class="lc-pattern">Classic DP — capstone problem</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LEETCODE PROGRESSION ═══ -->
+<section class="section" id="leetcode">
+  <div class="section-header">
+    <span class="section-num">05</span>
+    <div>
+      <div class="section-title">LeetCode Progression</div>
+      <div class="section-sub">Days 1–8: Easy only · Days 9–12: Easy+Medium · Days 13–32: Mostly Medium</div>
+    </div>
+  </div>
+  <div class="info-box tip">
+    <span class="info-icon">✓</span>
+    <span class="info-text"><strong>Strategy:</strong> Each problem is chosen to reinforce the day's Java/Spring/SQL concept — not just random practice. Always explain your approach before coding, then write on paper first.</span>
+  </div>
+  <div class="prog-table-wrap" style="margin-top:20px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th><th>Problem</th><th>Difficulty</th><th>Pattern</th><th>Linked To</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>D01</td><td>#1 Two Sum</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>HashMap</td><td>Java basics</td></tr>
+        <tr><td>D02</td><td>#217 Contains Duplicate</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>HashSet</td><td>OOP</td></tr>
+        <tr><td>D03</td><td>#242 Valid Anagram</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Frequency Count</td><td>Polymorphism</td></tr>
+        <tr><td>D04</td><td>#344 Reverse String</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Two Pointers</td><td>Arrays/Operators</td></tr>
+        <tr><td>D05</td><td>#26 Remove Duplicates</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Two Pointers</td><td>Memory</td></tr>
+        <tr><td>D06</td><td>#20 Valid Parentheses</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Stack</td><td>Exceptions/GC</td></tr>
+        <tr><td>D07</td><td>#125 Valid Palindrome</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Two Pointers</td><td>Strings</td></tr>
+        <tr><td>D08</td><td>#206 Reverse Linked List</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Linked List</td><td>Threading</td></tr>
+        <tr><td>D09</td><td>#49 Group Anagrams</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>HashMap</td><td>Collections</td></tr>
+        <tr><td>D10</td><td>#232 Queue using Stacks</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Stack/Queue</td><td>Queue/Deque</td></tr>
+        <tr><td>D11</td><td>#387 First Unique Char</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>HashMap</td><td>Hashing</td></tr>
+        <tr><td>D12</td><td>#146 LRU Cache</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>HashMap + DLL</td><td>Data Structures</td></tr>
+        <tr><td>D13</td><td>#56 Merge Intervals</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Sorting</td><td>Lambda/Comparator</td></tr>
+        <tr><td>D14</td><td>#347 Top K Frequent</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Heap/HashMap</td><td>Streams</td></tr>
+        <tr><td>D15</td><td>#238 Product Except Self</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Prefix Array</td><td>Arrays</td></tr>
+        <tr><td>D16</td><td>#3 Longest Substring</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Sliding Window</td><td>Review</td></tr>
+        <tr><td>D17</td><td>#175 Combine Two Tables</td><td><span class="dot-easy"></span><span class="tag tag-sql">SQL Easy</span></td><td>LEFT JOIN</td><td>SQL Basics</td></tr>
+        <tr><td>D18</td><td>#181 Employee vs Manager</td><td><span class="dot-easy"></span><span class="tag tag-sql">SQL Easy</span></td><td>Self Join</td><td>Joins</td></tr>
+        <tr><td>D19</td><td>#184 Dept Highest Salary</td><td><span class="dot-medium"></span><span class="tag tag-sql">SQL Med</span></td><td>GROUP BY</td><td>Aggregation</td></tr>
+        <tr><td>D20</td><td>#178 Rank Scores</td><td><span class="dot-medium"></span><span class="tag tag-sql">SQL Med</span></td><td>Window Functions</td><td>Indexing</td></tr>
+        <tr><td>D21</td><td>#706 Design HashMap</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Design</td><td>Spring Basics</td></tr>
+        <tr><td>D22</td><td>#704 Binary Search</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Binary Search</td><td>REST</td></tr>
+        <tr><td>D23</td><td>#15 3Sum</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Two Pointers</td><td>Actuator</td></tr>
+        <tr><td>D24</td><td>#33 Rotated Array Search</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Binary Search</td><td>Security</td></tr>
+        <tr><td>D25</td><td>#155 Min Stack</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Stack Design</td><td>SOLID</td></tr>
+        <tr><td>D26</td><td>#225 Stack using Queues</td><td><span class="dot-easy"></span><span class="tag tag-easy">Easy</span></td><td>Stack/Queue</td><td>Creational</td></tr>
+        <tr><td>D27</td><td>#2 Add Two Numbers</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Linked List</td><td>Structural</td></tr>
+        <tr><td>D28</td><td>#53 Maximum Subarray</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Kadane / DP</td><td>Behavioral</td></tr>
+        <tr><td>D29</td><td>#622 Circular Queue</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Queue Design</td><td>Microservices</td></tr>
+        <tr><td>D30</td><td>#621 Task Scheduler</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>Greedy/Queue</td><td>Messaging</td></tr>
+        <tr><td>D31</td><td>#200 Number of Islands</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>BFS/DFS</td><td>Async</td></tr>
+        <tr><td>D32</td><td>#322 Coin Change</td><td><span class="dot-medium"></span><span class="tag tag-medium">Medium</span></td><td>DP</td><td>Capstone</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══ DAY FILE FORMAT ═══ -->
+<section class="section" id="format">
+  <div class="section-header">
+    <span class="section-num">06</span>
+    <div>
+      <div class="section-title">Each Day File Format</div>
+      <div class="section-sub">Every markdown file follows this exact structure — ~300–500 lines each</div>
+    </div>
+  </div>
+  <div class="repo-tree" style="margin-bottom:20px;">
+<span style="color:#6dd4e8"># Day X: [Topic Name]</span>
+<span style="color:rgba(247,244,239,0.4)">**Date:** [Date] | **Duration:** [45min/1hr] | **Week:** [N] | **GG Level:** [GG9/GG10/GG11]</span>
+
+<span style="color:#6dd4e8">## Pre-read (5 min)</span>
+<span style="color:rgba(247,244,239,0.5)">Brief topic introduction with a real-world analogy.</span>
+
+<span style="color:#6dd4e8">## Interview Questions</span>
+
+<span style="color:#ff5c00">### Q1: [Question from GG list]</span>
+<span style="color:rgba(247,244,239,0.55)">**GG Level:** GG9/GG10/GG11</span>
+<span style="color:rgba(247,244,239,0.55)">**Answer:** [Detailed beginner-friendly explanation with analogy]</span>
+<span style="color:rgba(247,244,239,0.55)">**Code Example:** [Complete, runnable Java code]</span>
+<span style="color:rgba(247,244,239,0.55)">**Interview Tip:** [What the interviewer expects to hear]</span>
+<span style="color:rgba(247,244,239,0.55)">**Go Deeper:** See shail-new [file.md] Q# for advanced follow-ups</span>
+<span style="color:rgba(247,244,239,0.3)">---</span>
+
+<span style="color:#6dd4e8">## Coding Problem of the Day</span>
+
+<span style="color:#ff5c00">### LeetCode #XXX: [Problem Name] (Easy/Medium)</span>
+<span style="color:rgba(247,244,239,0.55)">**Link:** https://leetcode.com/problems/xxx</span>
+<span style="color:rgba(247,244,239,0.55)">**Pattern:** [Two Pointers / HashMap / etc.]</span>
+<span style="color:rgba(247,244,239,0.55)">**Problem Statement:** [Brief description]</span>
+<span style="color:rgba(247,244,239,0.55)">**Approach:** [Step-by-step thinking process]</span>
+<span style="color:rgba(247,244,239,0.55)">**Solution:** [Complete Java solution with comments]</span>
+<span style="color:rgba(247,244,239,0.55)">**Complexity:** Time O(?), Space O(?)</span>
+<span style="color:rgba(247,244,239,0.55)">**Follow-up:** [Harder variant or optimization to think about]</span>
+
+<span style="color:#6dd4e8">## Quick Recap</span>
+<span style="color:rgba(247,244,239,0.55)">- 3-5 bullet points of key takeaways</span>
+
+<span style="color:#6dd4e8">## Prep for Next Session</span>
+<span style="color:rgba(247,244,239,0.55)">- [What to review before next day]</span>
+  </div>
+
+  <div class="format-grid">
+    <div class="format-card fc1">
+      <div class="format-head">📋 File Stats</div>
+      <div class="format-body">
+        <ul>
+          <li>Total files: <strong>34</strong> (32 day + README + SCHEDULE)</li>
+          <li>~300–500 lines per day file</li>
+          <li>All Java code: complete &amp; runnable</li>
+          <li>LeetCode: detailed approach + code</li>
+          <li>SQL: consistent employees/departments schema</li>
+        </ul>
+      </div>
+    </div>
+    <div class="format-card fc2">
+      <div class="format-head">🔗 shail-new Links</div>
+      <div class="format-body">
+        <ul>
+          <li>Every BRIDGE/REF question links to exact file + Q#</li>
+          <li>Spring Boot → <code>spring-boot-qa.md</code></li>
+          <li>Core Java → <code>core-qa.md</code></li>
+          <li>Advanced Java → <code>advanced-qa.md</code></li>
+          <li>Patterns → <code>design-patterns/</code></li>
+          <li>DSA → <code>dsa-patterns/</code></li>
+        </ul>
+      </div>
+    </div>
+    <div class="format-card fc3">
+      <div class="format-head">📐 Spring Boot Examples</div>
+      <div class="format-body">
+        <ul>
+          <li>Spring examples reference <code>github-repo-tracker</code> project</li>
+          <li>Design patterns complement <code>SystemDesign/01_Design_Patterns/</code></li>
+          <li>Pattern content links to <code>design-patterns/</code></li>
+          <li>New: patterns in Spring (Observer = @EventListener, Proxy = @Transactional)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="format-card fc4">
+      <div class="format-head">📊 SCHEDULE.md Tracker</div>
+      <div class="format-body">
+        <ul>
+          <li>Full 8-week calendar table with dates</li>
+          <li>Confidence rating (1–5) per question</li>
+          <li>Weak areas noted per session</li>
+          <li>Progress checkboxes for each day</li>
+          <li>Revision list at the bottom</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SESSION FORMAT ═══ -->
+<section class="section" id="session">
+  <div class="section-header">
+    <span class="section-num">07</span>
+    <div>
+      <div class="section-title">Session Flow for Your Friend</div>
+      <div class="section-sub">Each session follows this 4-phase structure. Your friend leads the interview.</div>
+    </div>
+  </div>
+  <div class="two-col">
+    <div class="session-flow">
+      <div class="session-step">
+        <div class="step-line"><div class="step-dot">01</div><div class="step-connector"></div></div>
+        <div class="step-body">
+          <div class="step-time">First 5 min</div>
+          <div class="step-title">Recap Quiz</div>
+          <div class="step-desc">Friend asks 2–3 questions from the <em>previous session's</em> file. No peeking. Rate answers 1–5 and note confidence in SCHEDULE.md.</div>
+        </div>
+      </div>
+      <div class="session-step">
+        <div class="step-line"><div class="step-dot">02</div><div class="step-connector"></div></div>
+        <div class="step-body">
+          <div class="step-time">Next 25–35 min</div>
+          <div class="step-title">Interview Q&amp;A</div>
+          <div class="step-desc">Friend reads each question from the day's file. You answer without looking. After each answer, discuss together — friend uses the "Interview Tip" section to evaluate.</div>
+        </div>
+      </div>
+      <div class="session-step">
+        <div class="step-line"><div class="step-dot">03</div><div class="step-connector"></div></div>
+        <div class="step-body">
+          <div class="step-time">Next 10–15 min</div>
+          <div class="step-title">Coding on Paper</div>
+          <div class="step-desc">You explain and code the LeetCode problem on paper or whiteboard — never on an IDE first. Cover: approach, complexity (Time/Space), edge cases.</div>
+        </div>
+      </div>
+      <div class="session-step">
+        <div class="step-line"><div class="step-dot">04</div><div class="step-connector" style="visibility:hidden;"></div></div>
+        <div class="step-body">
+          <div class="step-time">Last 5 min</div>
+          <div class="step-title">Rate &amp; Record</div>
+          <div class="step-desc">Rate confidence (1–5) per question. Note weak spots in SCHEDULE.md tracker. Decide if any topic needs revisit before next session.</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="strat-card" style="border-top:3px solid var(--accent4); margin-bottom:16px;">
+        <div class="strat-label" style="color:var(--accent4);">Ground Rules</div>
+        <div class="strat-title">Before Every Session</div>
+        <ul style="font-size:13px; color:var(--muted); padding-left:18px; line-height:1.9;">
+          <li>Read the day file's <strong>Pre-read section</strong> (5 min before)</li>
+          <li>No IDE during session — paper/whiteboard only for code</li>
+          <li>Friend has authority to probe deeper on any answer</li>
+          <li>If confidence &lt; 3 on any topic → add to revision list</li>
+          <li>Don't skip the Recap Quiz — spaced repetition works</li>
+        </ul>
+      </div>
+      <div class="info-box warn">
+        <span class="info-icon">⚠</span>
+        <span class="info-text"><strong>For your friend:</strong> The "Interview Tip" section in each question tells you exactly what a good answer looks like and what follow-up questions to ask. Use it as your evaluation rubric — don't just accept a vague answer.</span>
+      </div>
+      <div class="info-box tip" style="margin-top:12px;">
+        <span class="info-icon">💡</span>
+        <span class="info-text"><strong>GG9/10 questions</strong> should be answered in 60–90 seconds. <strong>GG11 questions</strong> (design/architecture) deserve 2–3 minutes with examples. <strong>Coding problems</strong> should be explained first for 2 min before writing any code.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FINAL NOTES ═══ -->
+<section class="section">
+  <div class="section-header">
+    <span class="section-num">08</span>
+    <div>
+      <div class="section-title">Implementation Notes</div>
+      <div class="section-sub">Key constraints and reminders for building the day files</div>
+    </div>
+  </div>
+  <div class="strategy-grid">
+    <div class="strat-card" style="border-top:3px solid #0288d1;">
+      <div class="strat-label" style="color:#0288d1;">Content Rules</div>
+      <div class="strat-title">Writing Style</div>
+      <div class="strat-desc">Beginner-friendly tone — imagine explaining to someone who knows programming but not Java deeply. Every concept needs a real-world analogy AND a code example. No jargon without explanation.</div>
+      <div class="strat-tags">
+        <span class="stag">Runnable code only</span>
+        <span class="stag">Analogy first</span>
+        <span class="stag">Interview tip required</span>
+      </div>
+    </div>
+    <div class="strat-card" style="border-top:3px solid #795548;">
+      <div class="strat-label" style="color:#795548;">Linking Rules</div>
+      <div class="strat-title">shail-new Cross-References</div>
+      <div class="strat-desc">Every BRIDGE/REF tag must include the exact file path and question number. Format: "Go Deeper: <code>shail-new/java/core-qa.md Q12</code>" — consistent across all 34 files.</div>
+      <div class="strat-tags">
+        <span class="stag">Exact file + Q#</span>
+        <span class="stag">Consistent format</span>
+        <span class="stag">One-click navigation</span>
+      </div>
+    </div>
+    <div class="strat-card" style="border-top:3px solid #e91e63;">
+      <div class="strat-label" style="color:#e91e63;">Coding Rules</div>
+      <div class="strat-title">LeetCode Solutions</div>
+      <div class="strat-desc">Every solution file must include: problem statement summary, step-by-step approach thinking, complete Java solution with comments, Time and Space complexity, and one follow-up harder variant.</div>
+      <div class="strat-tags">
+        <span class="stag">Approach before code</span>
+        <span class="stag">O(n) complexity</span>
+        <span class="stag">Follow-up variant</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /page -->
+
+<footer>
+  Interview Prep Roadmap · Shailender Kumar · 32 Sessions · Mar 28 – May 22, 2026 · Built on shail-new repo
+</footer>
+
+<script>
+// Highlight active nav on scroll
+const tabs = document.querySelectorAll('.nav-tab');
+const sections = document.querySelectorAll('section[id], .section[id]');
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      tabs.forEach(t => t.classList.remove('active'));
+      const active = document.querySelector('.nav-tab[href="#' + entry.target.id + '"]');
+      if (active) active.classList.add('active');
+    }
+  });
+}, { rootMargin: '-30% 0px -60% 0px' });
+
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
