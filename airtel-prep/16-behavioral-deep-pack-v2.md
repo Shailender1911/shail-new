@@ -3,6 +3,13 @@
 > **This supersedes `15-behavioral-deep-pack.md`.** Use this file for the Airtel managerial round. v1 is kept for diff/history only.
 >
 > What changed in v2: STAR 4 (Disagreement) rewritten around state-machine framework selection — a real lead-level technical debate, not a junior security gotcha. STAR 6 (Failure) rewritten around the Bouncy Castle / GPay release production issue — anchored to your highest-stakes shipped work. Section 2 now leads with **Top 20 — Detailed STAR-style answers** (sorted by frequency) so the most-asked questions get full prep, not one-liners.
+>
+> **What changed in v2.1 (code-anchored stories from your prior budget-company prep):**
+> - **STAR 6 (Failure)** re-anchored to the **actual incident**: GPay **SFTP recon upload failure** caused by Bouncy Castle missing/broken for SSHJ OpenSSHv1 key parsing — anchored to `GpayServiceImpl.uploadReconFileToSftpServer` + `SftpClient.registerBouncyCastleProvider()`. The PGP-decrypt framing in earlier v2 was directionally right but anchored to the wrong code path; this version maps to code the interviewer can pull up.
+> - **STAR 11 (Production Bug) added**: Cache-induced auto-loan-trigger for Meesho — anchored to `ApplicationDBService.selectApplication` `@Cacheable` + `checkEligibilityAsync` defensive `cacheEvictByKey.evictApplicationCache(...)` + `AutoDisbursalFactory.shouldEnableAutoDisbursal(...)`. Use it as a backup for production-incident questions, or as the primary when the interviewer asks for a money-moving bug or a cache-coherence problem.
+> - **Q12 (Peer disagreement) rewritten** as **Meesho `AutoDisbursalFactory` vs inline channel-code switch** — replaces the lighter AOP-vs-Profiles example. Anchored to `AutoDisbursalFactory` + `AbstractMeeshoAutoDisbursalHandler` + `MeeshoAutoDisbursalHandler` + `MeeshoCliAutoDisbursalHandler`. Stronger because it ties directly to a Spring auto-discovery pattern the interviewer can ask follow-up questions about.
+> - **Section 3 Q1 ("Genuinely wrong"), Section 3 Q4 (Manager asks wrong thing), Q13 (Stress), Q2 (Failure)** all updated to the SFTP / BC narrative.
+> - **Section 4 matrix** expanded with new lines: *money-moving bug*, *design-pattern advocacy*, *"time you were genuinely wrong"*, *cache / coherence / correctness*. Map shows which STAR to pull for each.
 
 > Three goals: (1) STAR bank you can pull from instinctively, (2) defensive answers for hard behavioral Qs, (3) AI productivity narrative that lines up with Airtel's GenAI bets.
 > **Cross-refs:** STAR stories also in File 03; project anchors in Files 01 and 04.
@@ -39,7 +46,7 @@ Result        → 20 sec   (metric + business impact + what you learned)
 
 ---
 
-## SECTION 1 — THE STAR BANK (10 stories, memorize 4)
+## SECTION 1 — THE STAR BANK (11 stories, memorize the starred ones in Section 6)
 
 > Pick 4 to memorize cold. Different prompts hit different stories — have one for each scenario type below.
 
@@ -166,37 +173,38 @@ Result        → 20 sec   (metric + business impact + what you learned)
 
 ---
 
-### STAR 6. Biggest Mistake / Failure — **Bouncy Castle Provider Missing in Prod During GPay Release**
+### STAR 6. Biggest Mistake / Failure — **GPay Recon SFTP Upload Failure (Bouncy Castle Missing for SSHJ Key Parsing)**
 
-> **v2 replacement.** v1 used the mandate-cron retry-idempotency story; that story still holds (kept as a one-line backup below) but this BC story is the one with the highest stakes and the cleanest "what I learned" narrative — both because it's tied to a flagship release and because the failure mode (silent crypto) is something any senior interviewer instantly respects.
+> **Anchored to real code:** `GpayServiceImpl.uploadReconFileToSftpServer` (`dgl_base/dgl-services/.../GpayServiceImpl.java` L415-423) → `KeyBasedSftpClient.upload(...)` → `SftpClient.registerBouncyCastleProvider()` (`dgl_base/dgl-transport/src/com/dgl/sftpClient/SftpClient.java` L26-98). The defensive registration + verification + re-registration pattern visible in `SftpClient` today is the fix I shipped after this failure.
 
-**Situation.** Two days before the Google Pay term-loan go-live, our canary deploy started silently dropping Google's encrypted callbacks — `PgpCryptoService.decrypt()` was returning `null` on every encrypted payload. Customer transactions were getting stuck in `IN_PROGRESS`. The same code path worked perfectly in dev, UAT, and pre-prod. We had a hard launch window with Google.
+**Situation.** Shortly after our Google Pay term-loan integration went to production, our daily **reconciliation file upload to GPay's SFTP server started failing** — every attempt threw `ZcV4Exception(UPLOAD_RECON_FILE_FAILED)` (`PAYU-31032`). GPay's reconciliation contract is strict: missed files break their settlement match and trigger a SEV-2 partner ticket on their side. The upload code (`GpayServiceImpl.uploadReconFileToSftpServer` → `KeyBasedSftpClient.upload(...)`) worked perfectly in UAT and pre-prod. In prod it failed on the first nightly run after deploy.
 
-**Task.** Diagnose under release pressure, fix without missing the launch, and make sure this class of failure never repeats.
+**Task.** Diagnose under partner-SLA pressure, restore the upload before GPay raised a ticket, and make sure this class of failure never repeats — not just for GPay, but for every SFTP upload we'd build later.
 
 **Action.**
 
-- First instinct was to blame Google's payload format. Wrote a quick test that POSTed a known-good encrypted payload (one we had decrypted successfully in UAT minutes earlier) directly to the prod endpoint. **It also returned null.** So it wasn't a payload problem — it was an environment problem.
-- Pulled `Security.getProviders()` from a heap dump on the prod pod. **Bouncy Castle wasn't registered.** UAT had auto-loaded it via `META-INF/services` because the dev base image had `bcprov-jdk15on` on the bootclasspath; production used a hardened, stripped JRE that didn't honor the same service discovery path.
-- Three-layer fix, all shipped in one PR within the launch window:
-  1. **Explicit provider registration** — added `Security.addProvider(new BouncyCastleProvider())` in a `@Configuration` bean that loads before any PGP code path. No more reliance on classpath service discovery.
-  2. **Startup sanity check** — if `Security.getProvider("BC")` is null after init, the app refuses to start. Fail fast at boot, not silently in prod 4 hours later when the first Google callback arrives.
-  3. **Refactored `decrypt()` to throw on null** — previously a null return value silently fell through into a "mark transaction pending for retry" path, which made a code-path failure look like a business condition. Crypto operations must be loud.
-- Wrote a runbook entry for the on-call team: *"If GPay payloads start failing silently, first thing to check is `Security.getProviders()` on the affected pod."*
+- First instinct was to blame the SFTP server or the recon-file format. Wrote a quick test that uploaded a known-good fixed payload using the same `KeyBasedSftpClient` against the prod SFTP host with our prod private key. **It also failed — with a key-parse exception.** So it wasn't the payload, it wasn't the host, it was our client.
+- The private key was in **OpenSSHv1 format** (the new default since OpenSSH 7.8). SSHJ doesn't parse OpenSSHv1 keys natively — it needs **Bouncy Castle** for the key-format provider. We had `bcprov-jdk15on` and `bcpkix-jdk15on` declared in `dgl-transport/pom.xml`, but the WAR's `WEB-INF/lib` was missing them — the build had stripped them as "transitive duplicates" of a different version pinned in the parent POM.
+- Pulled `Security.getProviders()` from a heap dump on the prod pod. **"BC" was not registered.** Worse, on one pod BC was registered but **broken** — `MessageDigest.getInstance("MD5", "BC")` threw `NoSuchAlgorithmException`. That meant we couldn't even trust "BC is in the providers list" as a signal.
+- Three-layer fix, shipped in one PR within the partner window. All three are visible in `SftpClient.java` today:
+  1. **Static-block explicit registration** — added a `static { registerBouncyCastleProvider(); }` to `SftpClient` so the moment any SFTP client class is loaded, BC registration runs. No more reliance on classpath service discovery or WAR packaging luck.
+  2. **Verification step, not just "present" check** — `Security.getProvider("BC")` being non-null is not enough; we also call `MessageDigest.getInstance("MD5", "BC")` to confirm the provider is actually **usable**. If it isn't, we treat it as missing.
+  3. **Re-registration fallback** — `removeExistingAndRegisterNewBouncyCastleProvider()` removes a broken/stale BC and adds a fresh `new BouncyCastleProvider()`. This handles the case where some other library on the classpath registered an older/incompatible BC version before us.
+- Pinned `bcprov-jdk15on` + `bcpkix-jdk15on` versions explicitly in `dgl-transport/pom.xml` and added a build-time check to fail the WAR build if either JAR is absent from `WEB-INF/lib`.
+- Wrote a runbook entry for the on-call team: *"If GPay (or any) SFTP upload starts failing, first check is `Security.getProviders()` on the affected pod, then verify `MessageDigest.getInstance("MD5", "BC")` doesn't throw."*
 
 **Result.**
 
-- Identified and patched in **~47 minutes** from the first alert.
-- **No customer transactions lost** — the stuck ones were replayed after the fix landed.
-- **Launch shipped on schedule.**
-- The startup-sanity-check pattern has since caught the same class of issue in two other internal services that depend on Bouncy Castle for HSM signing — both caught at deploy time, never reached prod.
+- Identified and patched the same day — recon file uploaded successfully on the very next nightly cron after the deploy. **No GPay partner ticket raised.**
+- The defensive registration pattern (static block + verify + re-register) has since caught **two more BC-related issues** in unrelated code paths — both surfaced at class-load time, never at runtime under partner load.
+- Replaced "BC is registered" assumption with "BC is **registered and usable**" everywhere we touch crypto-adjacent code paths (SFTP key parsing, JWT JWKS, recon signing).
 
 **What I learned.** **Two failures of mine, not one.**
 
-- (a) I had assumed classpath service discovery was deterministic across JREs. It isn't — hardened/stripped JREs strip `META-INF/services` paths, and any code that relies on auto-registration is one base-image change away from silent failure. Verifiable assumptions only.
-- (b) Worse: I had let `decrypt()` return `null` on failure, and a downstream `if (decrypted == null) markPending()` branch swallowed the failure as a business no-op. **Crypto operations must be loud, never silent.** A silent crypto failure is a security failure — you don't know if you're being attacked or if your code is broken.
+- (a) I treated "BC is in the pom.xml" as equivalent to "BC will be on the runtime classpath." It isn't. WAR packaging, Maven duplicate filtering, and runtime classpath layering can all strip provider JARs between build and run. **Verifiable assumptions only** — if a dependency is critical at runtime, the code must verify it at startup.
+- (b) Worse: my initial registration code was a one-liner `Security.addProvider(new BouncyCastleProvider())`, which silently no-ops if BC is already registered — even if the existing BC is **broken**. A silent no-op on a critical security primitive is just as bad as a missing one. You don't get a stack trace; you get a quiet wrong answer four hours later when the cron fires.
 
-The discipline I now enforce on every security primitive: **(1) explicit registration, (2) startup sanity check, (3) failures throw — never return null.** Applied this to BC, to JCE-based AES, and to the JWKS lookup in `JwtHelper`.
+The discipline I now enforce on every security primitive: **(1) static-block registration so it happens before any caller**, **(2) verification by actually using the provider** (`MessageDigest.getInstance(..., "BC")`), **(3) remove-and-re-register fallback if the existing provider is broken.** Applied this pattern to SFTP (this story), then to JCE-based AES in our PGP recon-signing path, and to a third internal HSM-signing service later.
 
 > **Backup failure (use only if pressed for a second example):** Mandate cron retry without idempotency keys. Reused the same transaction id on retries against Finflux; under intermittent failures we double-booked a small set of mandates, refunded affected merchants within 24 hours, introduced `generateUniqueKeyForRetry` per-attempt, post-mortem became internal reference for async integration retry design.
 
@@ -313,6 +321,43 @@ The discipline I now enforce on every security primitive: **(1) explicit registr
 
 ---
 
+### STAR 11. Production Bug — **Auto-Triggered Loans From Stale Application Cache (Meesho Auto-Disbursal)**
+
+> **Anchored to real code:** `ApplicationDBService.selectApplication(...)` `@Cacheable("A_USER_APPLICATION_CHACHE_MANAGER")` (TTL 120s) → `ZCVersion4ServiceImpl.checkEligibilityAsync(...)` (`dgl_base/dgl-services/.../ZCVersion4ServiceImpl.java` L2090-2099) → `AutoDisbursalFactory.shouldEnableAutoDisbursal(...)` (`dgl_base/dgl-connectors/.../autoDisbursal/AutoDisbursalFactory.java` L49-59) → `LoanServiceImpl.setAutoDisbursalFlag(...)` (L607-620) → loan creation. The explicit `cacheEvictByKey.evictApplicationCache(applicationId)` call you see at the top of `checkEligibilityAsync` is the fix that came out of this incident.
+
+**Situation.** Shortly after we rolled out **auto-disbursal for Meesho** (the `MEESHO_CHANNEL_CODE = as_meesho_01` flow, driven by `AutoDisbursalFactory` + `MeeshoAutoDisbursalHandler`), our ops team flagged that a small set of merchants had received **auto-triggered loans they shouldn't have qualified for** — eligibility had clearly changed (failed CPV, paused channel, or balance below the configured `lowerLimit` in `AUTO_DISBURSAL_CONFIG`), but the system had still fired the loan. We were looking at ~12 incorrectly disbursed loans across a single morning. Customer-trust risk, partner-trust risk with Meesho, and money on the line.
+
+**Task.** Stop the bleeding within the hour, identify the root cause, write the systemic fix so this class of bug couldn't recur for Meesho or any future partner using `AutoDisbursalFactory`, and reconcile the affected loans.
+
+**Action.**
+
+- **Step 1 — Stop the bleeding (~15 min).** Flipped the `AUTO_DISBURSAL_CONFIG` `isEnabled` flag to `false` for the affected Meesho channel codes via ConfigNexus. Auto-disbursal halted across the channel without a deploy.
+- **Step 2 — Reproduce, not theorize.** Pulled the application IDs of the 12 affected loans. For each, traced the timeline in `A_APPLICATION_STAGE_TRACKER` against the Redis `A_USER_APPLICATION_CHACHE_MANAGER` access logs. Pattern was identical across all 12: an admin or async event had updated the `ApplicationBean` (e.g., status flip, CPV result, balance refresh), and within the next **~120 seconds**, `checkEligibilityAsync` had run and made its decision against a **stale cached copy** from before the update.
+- **Step 3 — Root cause confirmed.** `ApplicationDBService.selectApplication` is `@Cacheable` on `A_USER_APPLICATION_CHACHE_MANAGER`, TTL 120s, max-idle 120s (`RedisConfig.getCacheManagerConfigs` L119-134). The eligibility path read `ApplicationBean` through that cache. Writes that mutated the application (admin updates, async balance refresh, status transitions) **were not consistently evicting the cache.** Within the 120s TTL, eligibility saw the pre-update bean and `AutoDisbursalFactory.shouldEnableAutoDisbursal(...)` returned `true` based on stale `lowerLimit`/`upperLimit`/`isEnabled` checks. **Cache coherence bug masquerading as a business-logic bug.**
+- **Step 4 — Layered fix, one PR.**
+  1. **Read-side defensive eviction at the dangerous boundary.** Added `cacheEvictByKey.evictApplicationCache(applicationId)` at the **very top** of `checkEligibilityAsync` (the log line `"Evicting application cache before eligibility validation"` is from this fix), so any eligibility decision is made against a fresh DB read, never a cached copy. The cost is one extra DB round-trip per eligibility call — measured at <2ms p99 — for a class of correctness problem that's worth far more than 2ms.
+  2. **Write-side eviction hygiene.** Audited every write site for `ApplicationBean` (status flip, balance update, CPV result write, admin override) and added explicit `cacheEvictByKey.evictApplicationCache(...)` after each. Stopped trusting TTL expiry as a coherence mechanism — TTL is an **availability** lever, not a **correctness** lever.
+  3. **Belt-and-suspenders idempotency at the factory boundary.** `AutoDisbursalFactory.shouldEnableAutoDisbursal(...)` now also checks the loan-creation idempotency key (`DedupeHelper.validateAndCheckDuplicateLoan`) before returning true, so even if a stale read slips through, a duplicate auto-disbursal can't be created.
+- **Step 5 — Reconciliation.** Reversed the 12 incorrectly disbursed loans manually with the finance team — refunded merchant accounts, recorded compensating entries, no customer charge.
+- **Step 6 — Re-enable.** Flipped Meesho `AUTO_DISBURSAL_CONFIG.isEnabled` back to `true` after the fix shipped to prod and the eligibility path was verified clean for 48 hours.
+
+**Result.**
+
+- **Zero recurrences** in the months after the fix — across Meesho, Meesho CLI, and the next two channel-coded auto-disbursal handlers we added.
+- The `evictApplicationCache` defensive call at the top of `checkEligibilityAsync` is now the **standard pattern** for any read that drives a money-moving decision — codified in our internal review checklist.
+- The **"TTL is availability, not correctness"** principle is now drilled into every new engineer onboarding to the lending stack. The bug was a great teaching example.
+- Affected loans reconciled within 48 hours, no customer charge.
+
+**What I learned.** **Three failures of mine, in order of severity.**
+
+- (a) I had **trusted TTL as a coherence mechanism**. TTL gives you availability (cache doesn't grow forever) — it does not give you correctness. If a write can change the answer of a read, the write must evict.
+- (b) I had let the **eligibility-decision read sit on the same cache** as cheap display reads. Reads that drive money-moving decisions need a **different cache policy** (or no cache) than reads that drive a dashboard refresh. Same `ApplicationBean`, but different consumer trust requirements.
+- (c) The factory pattern (`AutoDisbursalFactory`) gave me a clean place to add a defensive idempotency check — but I had originally treated the factory as a pure "what should we do?" decision layer, not a "what should we do **and** is it safe to do it?" layer. Decision layers near money should always carry an idempotency check, not just route to the right handler.
+
+The discipline I now enforce: **(1) any read that drives a money-moving decision evicts its own cache at entry; (2) any cache key whose underlying entity can be mutated has explicit eviction on every write site, not TTL fallback; (3) decision layers near money carry an idempotency check, not just a routing decision.**
+
+---
+
 ## SECTION 2 — THE BEHAVIORAL Q BANK
 
 ### 2A. TOP 20 — DETAILED ANSWERS (sorted by frequency, memorize these first)
@@ -331,13 +376,13 @@ The discipline I now enforce on every security primitive: **(1) explicit registr
 
 ---
 
-**Q2. "Tell me about a time you failed."** → **STAR 6 (Bouncy Castle / GPay)**
+**Q2. "Tell me about a time you failed."** → **STAR 6 (GPay SFTP / Bouncy Castle)**
 
-> *Opener:* "Two days before our Google Pay term-loan go-live, our canary deploy started silently dropping Google's encrypted callbacks."
+> *Opener:* "Our GPay reconciliation file upload to their SFTP server started failing right after we went to production."
 
-"Two days before our Google Pay term-loan go-live, our canary deploy started silently dropping Google's encrypted callbacks — `PgpCryptoService.decrypt()` was returning `null` on every payload. Customer transactions stuck in `IN_PROGRESS`. The exact same code worked perfectly in dev, UAT, pre-prod. I wrote a test that POSTed a known-good encrypted payload to the prod endpoint — it also returned null, so it wasn't the payload. Pulled `Security.getProviders()` from a heap dump on the prod pod: **Bouncy Castle wasn't registered.** UAT auto-loaded it via `META-INF/services`; the prod hardened JRE didn't honor that path. Three-layer fix in one PR: explicit `Security.addProvider(new BouncyCastleProvider())` in a `@Configuration` bean, startup sanity check that fails the boot if BC isn't present, and refactored `decrypt()` to throw on null instead of silently returning into a `markPending()` branch. Identified and patched in **~47 minutes**; launch shipped on schedule, no transactions lost. **What I learned: two failures of mine, not one.** I had assumed classpath service discovery was deterministic across JREs — it isn't. And I had let `decrypt()` return null on failure, which made a code-path failure look like a business condition. **Crypto operations must be loud, never silent.** I now require explicit provider registration, startup sanity checks for every critical security primitive, and crypto failures throw — never return null."
+"Our GPay reconciliation file upload to their SFTP server started failing right after we went to production — every nightly cron threw `UPLOAD_RECON_FILE_FAILED`. GPay's recon contract is strict; missed files break their settlement match. The exact same code worked perfectly in UAT and pre-prod. I wrote a test that uploaded a known-good fixed payload using the same `KeyBasedSftpClient` against the prod SFTP host — it failed with a **key-parse exception**. So it wasn't the payload or the host; it was our client. The private key was in OpenSSHv1 format, which SSHJ can't parse natively — it needs Bouncy Castle. Pulled `Security.getProviders()` from the prod pod heap dump: **BC wasn't registered.** On a second pod BC was registered but **broken** — `MessageDigest.getInstance(\"MD5\", \"BC\")` threw, meaning a `getProvider(\"BC\") != null` check would have lied to us. The WAR's `WEB-INF/lib` was missing `bcprov-jdk15on` because the build had stripped it as a duplicate of a different version pinned in the parent POM. Three-layer fix in one PR: static-block registration in `SftpClient` so BC loads before any SFTP caller, verification by actually using the provider (`MessageDigest.getInstance(\"MD5\", \"BC\")`) instead of just checking presence, and a remove-and-re-register fallback if the existing BC is broken. Patched the same day, recon uploaded successfully on the next cron, no GPay partner ticket raised. **What I learned: two failures of mine, not one.** I had assumed 'declared in pom.xml' meant 'present at runtime' — WAR packaging and duplicate filtering can strip provider JARs. And my initial `Security.addProvider(new BouncyCastleProvider())` silently no-ops if BC is already registered, even if broken — a silent no-op on a security primitive is as bad as a missing one. I now require: static-block registration before any caller, verification by actually exercising the provider, and remove-and-re-register fallback. Applied this pattern to SFTP key parsing, JCE-based AES, and our HSM signing path."
 
-*Time: ~90 sec. The senior signal is the two-failure self-awareness at the end. Don't shorten that.*
+*Time: ~90 sec. The two-failure self-awareness at the end is the senior signal. Don't shorten that.*
 
 ---
 
@@ -351,13 +396,15 @@ The discipline I now enforce on every security primitive: **(1) explicit registr
 
 ---
 
-**Q4. "Tell me about your biggest production incident."** → **STAR 2 (Digio NACH)**
+**Q4. "Tell me about your biggest production incident."** → **STAR 2 (Digio NACH)** *— backup: STAR 11 (Cache → auto-loan-trigger)*
 
 > *Opener:* "Our UPI NACH integration with Digio started producing duplicate state transitions in production."
 
 "Our UPI NACH integration with Digio started producing duplicate state transitions in production — same mandate moving through `INITIATED → ACTIVE` twice, with downstream side effects like duplicate notifications. Root cause: **Digio retries on any non-200 response, and callbacks were arriving faster than our DB writes committed.** I introduced a Redisson `RLock` keyed by `digio:upinach:callback:{mandateId}` to serialize per-mandate processing across pods, and switched to the **always-200-to-Digio** pattern — ack the webhook first, persist `ANachLogsEntity` (idempotency-keyed), then process async. Added graceful degradation: if Redis is down, log a `dedup-bypass` warning and proceed; the unique constraint on `event_id` is the safety net. Used `tryLock(waitTime, leaseTime, TimeUnit)` so a dead lock holder can't freeze us. **Result:** duplicate state transitions dropped to zero. A 10x callback storm during a Digio queue catch-up was absorbed without alerts. The two-phase pattern — ack and persist first, then process — is now our **standard webhook intake design** for every new partner integration. **What I learned:** the source's retry policy is your enemy if you skip the ack. Always design webhook intake as ack + persist (cheap, fast, idempotent), then process."
 
 *Time: ~75 sec. Note the symmetry — root cause first, layered fix, named pattern, what I learned. That structure is what the interviewer scores.*
+
+> **If the interviewer asks for a second incident (or specifically asks about a money-moving bug):** Switch to **STAR 11 (Cache → auto-loan-trigger for Meesho)**. One-line opener: *"After we rolled out Meesho auto-disbursal, a stale `@Cacheable` `ApplicationBean` was being read inside `checkEligibilityAsync`, causing the `AutoDisbursalFactory` to fire ~12 loans against pre-update eligibility state. Fix was defensive `cacheEvictByKey.evictApplicationCache` at the top of any eligibility read + write-side eviction hygiene + an idempotency check inside the factory. Codified the rule: **TTL is availability, not correctness.**"*
 
 ---
 
@@ -431,13 +478,19 @@ The discipline I now enforce on every security primitive: **(1) explicit registr
 
 ---
 
-**Q12. "How do you handle disagreement with a peer?"**
+**Q12. "How do you handle disagreement with a peer?"** → *(Anchored to `AutoDisbursalFactory` for Meesho)*
 
 > *Opener:* "Disagreements with peers go to POC, not to debate. Build the smallest thing that lets the peer see what you see."
 
-"AOP-based read-write split was a real one. A peer wanted to do datasource routing via Spring Profiles + separate beans; I wanted AOP with a `@DataSource(SLAVE_DB)` annotation. We were about to spend a week arguing in design review. Instead, I built POCs of both — same set of service methods, same Hikari config — and showed two things: (1) Spring Profiles required a redeploy to change routing strategy, (2) AOP gave per-method routing transparency that didn't change service code at all. The peer agreed once they saw both running — took 4 hours instead of 4 days. **Rule I follow:** disagreements with peers go to POC, not to debate. Build the smallest possible thing that lets them see what you see. Faster than arguing, and the peer ends up co-owning the choice with you instead of resenting it. The exception is when both options are roughly equivalent — then I defer to the peer if it's their area, and document the trade-off either way."
+"Cleanest example was the **Meesho auto-disbursal design call.** We were adding auto-disbursal for the `as_meesho_01` and `as_meesho_cli_01` channels — eligibility was based on a per-channel `AUTO_DISBURSAL_CONFIG` JSON with `isEnabled`, `lowerLimit`, `upperLimit`. A peer wanted to add the logic inline in `LoanServiceImpl.setAutoDisbursalFlag(...)` with a switch on `applicationBean.getChannel_code()` — `if (MEESHO_CHANNEL_CODE.equals(channel)) { ... } else if (MEESHO_CLI_CHANNEL_CODE.equals(channel)) { ... }`. His argument was simplicity — two channels, two if-branches, one file to read. My argument was that **the next partner is always closer than you think**: every partner integration we'd built (BharatPe, PhonePe, PayU, Meesho) had eventually grown its own eligibility quirks, and burying that in a switch inside `LoanServiceImpl` would force every future partner change to touch the same file. I proposed an **`AutoDisbursalFactory`** that took a `List<AutoDisbursalHandler>` from Spring's component scan and collected them into a `Map<channelCode, handler>` by `getChannelCode()`. Each partner gets its own handler (`MeeshoAutoDisbursalHandler`, `MeeshoCliAutoDisbursalHandler`, extending `AbstractMeeshoAutoDisbursalHandler` for shared logic), and `LoanServiceImpl` calls one method: `autoDisbursalFactory.shouldEnableAutoDisbursal(applicationBean, dto)`. Same pattern we'd already won with for `EventServiceFactory` and `TriggerServiceImpl`. We were about to debate it for a week. Instead, I built a **2-hour POC** — three handler classes, the factory, a unit test where adding a new partner was literally one new file. Showed it to the peer side-by-side with his inline version. He flipped on the spot — said *'OK the new-partner case is obviously cleaner, let's ship the factory.'* Took 2 hours of prototyping instead of a week of design-review argument. **Rule I follow:** disagreements with peers go to **POC, not to debate.** Build the smallest possible thing that lets them see what you see. Faster than arguing, and the peer ends up co-owning the choice with you instead of resenting it. The exception is when both options are roughly equivalent — then I defer to the peer if it's their area, and document the trade-off either way."
 
-*Time: ~65 sec. The "POC not debate" rule is the senior-IC marker. Most engineers debate. Senior engineers prototype.*
+*Time: ~75 sec. The "POC not debate" rule is the senior-IC marker. Most engineers debate. Senior engineers prototype. The Meesho factory beat works because it's anchored to a real Spring auto-discovery pattern they can ask follow-up questions about.*
+
+> **Cross-question prep — likely follow-ups:**
+> - *"Why not just Strategy pattern without a Factory?"* → "Factory is the entry point Spring auto-wires; Strategy is what each handler is. The Factory is just the resolver. Same pattern as `EventServiceFactory` in our state-machine layer."
+> - *"What if a channel code has no handler?"* → "`getHandler(channelCode)` returns `Optional`; absent means `shouldEnableAutoDisbursal` returns `false`. Fail-closed for a money-moving flag."
+> - *"How did you handle shared logic across Meesho variants?"* → "`AbstractMeeshoAutoDisbursalHandler` carries `getAutoDisbursalConfig(...)` reading `AUTO_DISBURSAL_CONFIG` from `Constants.AUTO_DISBURSAL_CONFIG_KEY`, and `evaluateAutoDisbursalEligibility(...)`. Concrete handlers only override `getChannelCode()`. Inheritance for the shared 80%, override for the 20%."
+> - *"Did you ever regret the abstraction?"* → "No — added a new channel handler in ~30 minutes when we extended auto-disbursal to a second variant. Would've been a 30-line conditional otherwise, with the regression risk that comes from editing the loan-creation hot path."
 
 ---
 
@@ -445,7 +498,7 @@ The discipline I now enforce on every security primitive: **(1) explicit registr
 
 > *Opener:* "Triage + communicate. The team should never be guessing about state."
 
-"Triage + communicate. First — what's the actual ask, what's immovable, what's negotiable. Communicate hourly during incidents — the team should never be guessing about state. **The GPay BC incident** is a clean example: 47 minutes from first alert to patched fix, and at every 10-minute mark I posted a status — *symptom confirmed*, *hypothesis: provider missing*, *fix in PR*, *canary verified*, *rollout green*. Stress is fine when the team is informed; surprise is the killer. After the incident I do a calm retrospective the next day — what slipped, what would I do differently, what's the prevention. The discipline I avoid: **heroics that nobody can audit.** Quietly pulling an all-nighter and shipping a fix without telling anyone is worse than a slower fix with the team in the loop. The audit trail is the team's protection, not just the system's."
+"Triage + communicate. First — what's the actual ask, what's immovable, what's negotiable. Communicate hourly during incidents — the team should never be guessing about state. **The GPay SFTP / Bouncy Castle incident** is a clean example: same-day fix under a partner SLA window, and at every status check I posted an update — *symptom confirmed (recon upload throwing UPLOAD_RECON_FILE_FAILED)*, *hypothesis: BC missing for SSHJ key parsing*, *heap-dump confirms BC not registered on pod A, BC registered-but-broken on pod B*, *three-layer fix in PR (static-block register + verify + re-register fallback)*, *canary verified*, *next cron uploaded successfully*. Stress is fine when the team is informed; surprise is the killer. After the incident I do a calm retrospective the next day — what slipped, what would I do differently, what's the prevention. The discipline I avoid: **heroics that nobody can audit.** Quietly pulling an all-nighter and shipping a fix without telling anyone is worse than a slower fix with the team in the loop. The audit trail is the team's protection, not just the system's."
 
 *Time: ~60 sec. The "heroics nobody can audit" beat is what separates senior from mid. The instinct to share state under pressure is the marker.*
 
@@ -606,13 +659,13 @@ These have the highest variance — bad answer kills the round, great answer win
 
 Most candidates pick a "wrong" that wasn't really wrong. Don't.
 
-> "Bouncy Castle and the GPay launch. Two days before our Google Pay term-loan go-live, I shipped the PGP integration with `Security.addProvider()` *not* explicit — relying on classpath service discovery via `META-INF/services` because that's how UAT had auto-loaded Bouncy Castle for months. On canary deploy, `PgpCryptoService.decrypt()` started silently returning `null`. Customer transactions stuck in `IN_PROGRESS`.
+> "Bouncy Castle and the GPay SFTP recon upload. After our GPay term-loan integration went to production, I shipped the SFTP-upload code (`GpayServiceImpl.uploadReconFileToSftpServer` → `KeyBasedSftpClient.upload(...)`) with a one-liner `Security.addProvider(new BouncyCastleProvider())` in a `@Configuration` bean — and relied on `bcprov-jdk15on` being on the runtime classpath because it was in `dgl-transport/pom.xml`. On the very first prod nightly cron, the upload threw `UPLOAD_RECON_FILE_FAILED`. The same code had worked perfectly in UAT and pre-prod for weeks.
 >
-> I was wrong on two counts. **First**, I had assumed classpath service discovery was deterministic across JREs — but our prod hardened JRE strips `META-INF/services` paths that the dev base image preserved. That assumption was unverified, and I shipped on it. **Second** — and this is the one I think about more — I had let `decrypt()` return `null` on failure, which silently fell through into a `markPending()` business path. **I had made a code-path failure look like a business condition.** A silent crypto failure is a security failure; you don't know if you're being attacked or if your code is broken.
+> I was wrong on two counts. **First**, I had assumed 'declared in pom.xml' meant 'present at runtime' — but our WAR build had stripped `bcprov-jdk15on` from `WEB-INF/lib` as a 'duplicate' of a different version pinned higher in the parent POM. So SSHJ couldn't parse the OpenSSHv1 private key, and the SFTP connection failed before it could even attempt to upload. That packaging assumption was unverified, and I shipped on it. **Second** — and this is the one I think about more — my initial `Security.addProvider(new BouncyCastleProvider())` would **silently no-op if BC was already registered, even if the existing BC was broken.** On a second pod, BC was registered but `MessageDigest.getInstance(\"MD5\", \"BC\")` threw — meaning the provider was loaded but unusable, and my `getProvider(\"BC\") != null` check would have lied to me. I had made a 'security primitive is broken' state indistinguishable from a 'security primitive is healthy' state. **A silent no-op on a security primitive is as bad as a missing one.**
 >
-> I owned the fix in 47 minutes: explicit `Security.addProvider(new BouncyCastleProvider())` in a `@Configuration` bean, startup sanity check that fails the boot if BC isn't registered, and refactored `decrypt()` to throw on null. Launch shipped on schedule, no transactions lost, and the startup sanity check has since caught the same class of issue in two other internal services.
+> I owned the fix the same day: static-block registration in `SftpClient` so BC loads before any caller; verification by actually using the provider (`MessageDigest.getInstance(\"MD5\", \"BC\")`) instead of just checking presence; and `removeExistingAndRegisterNewBouncyCastleProvider()` as a fallback when the existing provider is broken. Recon uploaded successfully on the next cron, no GPay partner ticket raised. That defensive pattern has since caught two more BC-related issues in unrelated paths — both at class-load time, never at runtime under partner load.
 >
-> What changed permanently in how I work: every security primitive now requires (1) **explicit registration**, (2) **startup sanity check**, (3) **failures throw — never return null.** I've also stopped trusting classpath service discovery for anything that matters at runtime. *(I've had others — the mandate-retry idempotency one is in the same category — but the BC one is the one I think about, because the failure mode was silent.)*"
+> What changed permanently in how I work: every critical security primitive now requires **(1) static-block registration so it happens before any caller**, **(2) verification by actually exercising the provider, not just checking presence**, **(3) remove-and-re-register fallback if the existing provider is broken.** And I've stopped trusting 'declared in pom.xml' for anything that matters at runtime — if a dependency is critical, the code verifies it at startup. *(I've had others — the mandate-retry idempotency one is in the same category — but the BC SFTP one is the one I think about, because the failure mode was 'looks fine on the dashboard, fails silently in the cron.')*"
 
 ### Q2. "Tell me about a project that didn't go well."
 
@@ -640,7 +693,7 @@ Tests how you handle authority + values together.
 
 > "Two cases. If it's a judgment call where reasonable people disagree — I disagree-and-commit. State my view clearly, raise specific risks, then execute the manager's call and own the outcome. That's the contract. The state-machine disagreement is a clean version of this — I made my case with a prototype and a migration-cost answer, lead made the final call to start pragmatic, I would have executed Spring SM cleanly if he'd called it the other way.
 >
-> If it's something I think is clearly wrong — security, money safety, user harm — I escalate above the manager once, with data and a recommended alternative. The Bouncy Castle silent-failure pattern is a category I now treat as never-disagree-and-commit: any time a 'simpler' option turns a code-path failure into a silent business path, I escalate.
+> If it's something I think is clearly wrong — security, money safety, user harm — I escalate above the manager once, with data and a recommended alternative. The Bouncy Castle SFTP silent-failure pattern is a category I now treat as never-disagree-and-commit: any time a 'simpler' option leaves a security primitive in an unverifiable state — present-but-broken indistinguishable from healthy — I escalate.
 >
 > The default is disagree-and-commit; the exception is escalate-with-data. I don't go 'this is wrong, I won't do it' as a first move. That kind of friction burns more trust than it saves."
 
@@ -652,16 +705,20 @@ Tests how you handle authority + values together.
 | If they ask…                         | Lead STAR                         | Backup STAR                          |
 | ------------------------------------ | --------------------------------- | ------------------------------------ |
 | Most challenging / impactful project | **1** ConfigNexus / Eklavya       | **3** GPay                           |
-| Production incident                  | **2** Digio NACH storm            | **6** BC / GPay (or Mandate retry)   |
+| Production incident                  | **2** Digio NACH storm            | **11** Cache → auto-loan-trigger (Meesho) |
+| Money-moving bug / data integrity    | **11** Cache → auto-loan-trigger (Meesho) | **2** Digio NACH storm       |
 | Technical decision proud of          | **3** GPay 3-layer                | **7** Read-write split               |
 | Disagreement / conflict (with lead)  | **4** State Machine vs Spring SM  | **5** ConfigNexus 4-role             |
-| Disagreement / conflict (with peer)  | **Q12** AOP vs Profiles POC       | **4** State Machine                  |
+| Disagreement / conflict (with peer)  | **Q12** Meesho `AutoDisbursalFactory` vs inline switch | **4** State Machine |
+| Design-pattern advocacy              | **Q12** Meesho `AutoDisbursalFactory` | **2** Digio Strategy + Factory     |
 | Lead without authority               | **5** ConfigNexus 4-role          | **4** State Machine                  |
-| Mistake / failure                    | **6** Bouncy Castle / GPay        | Mandate retry (one-line)             |
+| Mistake / failure                    | **6** GPay SFTP / Bouncy Castle   | Mandate retry (one-line)             |
+| "Time you were genuinely wrong"      | **6** GPay SFTP / Bouncy Castle   | (use only this one)                  |
 | Performance optimization             | **7** Read-write split            | **9** Async migration                |
 | Algorithm / business logic           | **8** Split payment               | **7** Read-write split               |
-| Tight deadline / pressure            | **9** Async migration             | **6** BC / GPay (47-min recovery)    |
+| Tight deadline / pressure            | **9** Async migration             | **6** GPay SFTP / BC (same-day fix)  |
 | AI / productivity                    | **10** Cursor + MCP stack         | (highlight Eklavya tie-in)           |
+| Cache / coherence / correctness      | **11** Cache → auto-loan-trigger  | **7** Read-write split (TTL/lag context) |
 
 
 ---
@@ -697,8 +754,10 @@ Tests how you handle authority + values together.
 
 - Read this file end-to-end once.
 - Memorize STAR 1, 2, 3 cold (Eklavya/ConfigNexus, Digio, GPay).
-- Memorize **STAR 6 (Bouncy Castle / GPay)** word-for-word — it's the question with highest stake.
+- Memorize **STAR 6 (GPay SFTP / Bouncy Castle)** word-for-word — it's the question with highest stake. Anchor: `GpayServiceImpl.uploadReconFileToSftpServer` + `SftpClient.registerBouncyCastleProvider()`.
 - Memorize **STAR 4 (State Machine vs Spring SM)** — it's the second-highest stake, and the disagreement question is asked in nearly every managerial round.
+- Memorize **STAR 11 (Cache → auto-loan-trigger for Meesho)** — anchor: `ApplicationDBService.selectApplication` `@Cacheable` + `checkEligibilityAsync` defensive evict + `AutoDisbursalFactory`. Use it whenever the interviewer asks for a money-moving bug, a cache-coherence problem, or a second production incident.
+- Memorize **Q12 (Meesho `AutoDisbursalFactory` vs inline switch)** — anchor: `AutoDisbursalFactory` + `AbstractMeeshoAutoDisbursalHandler` + `MeeshoAutoDisbursalHandler` + `MeeshoCliAutoDisbursalHandler`. Use it for peer-disagreement, design-pattern advocacy, and "tell me about a design pattern you applied" questions.
 - Memorize Q1-Q4 from Section 3.
 - Drill Q1-Q20 from Section 2A — these are the ones you'll actually be asked.
 - Memorize the opening script (Section 5).
