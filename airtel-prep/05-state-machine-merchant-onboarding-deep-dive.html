@@ -1,0 +1,2041 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>State Machine + Merchant Onboarding — Interview Deep Dive</title>
+<meta name="description" content="Senior-IC-grade walkthrough of the DLS pragmatic state machine: ApplicationStage, A_APPLICATION_STAGE_TRACKER, TriggerService, dgl-status, and the 30% onboarding-time reduction.">
+
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+
+<!-- Prism.js core + theme (we override via CSS vars) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
+
+<style>
+/* ============================================================
+   Theme + base
+   ============================================================ */
+:root {
+  --bg: #fafafa;
+  --bg-elev: #ffffff;
+  --bg-code: #f6f8fa;
+  --bg-code-block: #1e1e2e;
+  --bg-callout: #fff7ed;
+  --bg-callout-strong: #fef3c7;
+  --bg-defensive: #fef2f2;
+  --bg-good: #ecfdf5;
+  --bg-trap: #fff1f2;
+  --bg-quote: #f0f9ff;
+
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+  --fg-inverse: #f8fafc;
+
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --border-callout: #fbbf24;
+  --border-defensive: #f87171;
+  --border-good: #34d399;
+  --border-trap: #fb7185;
+  --border-quote: #38bdf8;
+
+  --accent: #2563eb;
+  --accent-2: #7c3aed;
+  --accent-warm: #ea580c;
+  --accent-success: #059669;
+  --accent-danger: #dc2626;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.06);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --content-max: 820px;
+  --toc-width: 280px;
+  --header-h: 56px;
+}
+
+[data-theme="dark"] {
+  --bg: #0b1020;
+  --bg-elev: #111729;
+  --bg-code: #1a2138;
+  --bg-code-block: #0d1224;
+  --bg-callout: #2a1d0a;
+  --bg-callout-strong: #3b2710;
+  --bg-defensive: #2a0e0e;
+  --bg-good: #0a1f17;
+  --bg-trap: #2a0d14;
+  --bg-quote: #0a1c2a;
+
+  --fg: #e6edf6;
+  --fg-muted: #a3b3c7;
+  --fg-subtle: #7f8fa6;
+  --fg-inverse: #0f172a;
+
+  --border: #1f2a44;
+  --border-strong: #2c3a59;
+  --border-callout: #b45309;
+  --border-defensive: #b91c1c;
+  --border-good: #047857;
+  --border-trap: #be123c;
+  --border-quote: #0369a1;
+
+  --accent: #60a5fa;
+  --accent-2: #a78bfa;
+  --accent-warm: #fb923c;
+  --accent-success: #34d399;
+  --accent-danger: #f87171;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 16px); }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv01", "cv03";
+}
+
+/* ============================================================
+   Header
+   ============================================================ */
+header.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--header-h);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  backdrop-filter: saturate(140%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  text-decoration: none;
+}
+.brand-mark {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 700;
+}
+.brand-meta {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  font-weight: 500;
+  margin-left: 4px;
+}
+.spacer { flex: 1; }
+.icon-btn {
+  height: 34px; width: 34px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.icon-btn:hover { background: var(--bg-code); color: var(--fg); border-color: var(--border); }
+.text-btn {
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 13px; font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+.text-btn:hover { background: var(--bg-code); color: var(--fg); }
+
+/* ============================================================
+   Layout
+   ============================================================ */
+.layout {
+  display: grid;
+  grid-template-columns: var(--toc-width) minmax(0, 1fr);
+  max-width: 1400px;
+  margin: 0 auto;
+  gap: 32px;
+  padding: 28px 24px 80px;
+}
+
+aside.toc {
+  position: sticky;
+  top: calc(var(--header-h) + 24px);
+  align-self: start;
+  max-height: calc(100vh - var(--header-h) - 48px);
+  overflow-y: auto;
+  font-size: 13.5px;
+  padding-right: 8px;
+}
+aside.toc::-webkit-scrollbar { width: 6px; }
+aside.toc::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.toc-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  margin: 0 0 10px;
+  padding: 0 12px;
+}
+.toc ul { list-style: none; padding: 0; margin: 0; }
+.toc li { margin: 0; }
+.toc a {
+  display: block;
+  padding: 5px 12px;
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  margin-left: -2px;
+  border-radius: 0 6px 6px 0;
+  font-weight: 500;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.toc a:hover { color: var(--fg); background: var(--bg-code); }
+.toc a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+.toc .lvl-3 a { padding-left: 24px; font-size: 12.5px; }
+.toc .lvl-4 a { padding-left: 36px; font-size: 12px; opacity: 0.85; }
+
+main {
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ============================================================
+   Typography
+   ============================================================ */
+h1, h2, h3, h4 { letter-spacing: -0.02em; line-height: 1.25; color: var(--fg); }
+h1 {
+  font-size: 36px;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+h1 .subtitle {
+  display: block;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--fg-subtle);
+  margin-top: 8px;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 24px;
+  margin: 56px 0 16px;
+  padding-top: 8px;
+  font-weight: 700;
+  border-top: 1px solid var(--border);
+}
+h2:first-of-type { border-top: 0; padding-top: 0; margin-top: 32px; }
+h3 {
+  font-size: 18px;
+  margin: 32px 0 12px;
+  font-weight: 600;
+}
+h4 {
+  font-size: 15px;
+  margin: 22px 0 8px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+p { margin: 0 0 14px; color: var(--fg); }
+strong { font-weight: 700; color: var(--fg); }
+em { color: var(--fg-muted); }
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 40px 0;
+}
+a { color: var(--accent); text-decoration: none; transition: color 120ms ease; }
+a:hover { color: var(--accent-2); text-decoration: underline; }
+
+ul, ol { padding-left: 22px; margin: 8px 0 16px; }
+li { margin: 4px 0; }
+
+blockquote {
+  border-left: 3px solid var(--border-quote);
+  background: var(--bg-quote);
+  margin: 16px 0;
+  padding: 14px 18px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--fg);
+  font-style: normal;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* ============================================================
+   Inline code + tables
+   ============================================================ */
+:not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-code);
+  color: var(--fg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 14px;
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+th, td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+th {
+  background: var(--bg-code);
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}
+tr:last-child td { border-bottom: 0; }
+tr:hover td { background: color-mix(in srgb, var(--bg-code) 50%, transparent); }
+td code, th code { font-size: 12.5px; }
+
+/* ============================================================
+   Code blocks (overrides Prism)
+   ============================================================ */
+.code-card {
+  margin: 16px 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-code-block);
+  box-shadow: var(--shadow-sm);
+}
+.code-card .code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #c9d1d9;
+}
+.code-card .code-head .lang {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  color: #8b949e;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.code-card .code-head .filepath {
+  flex: 1;
+  font-size: 11.5px;
+  color: #8b949e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.code-card .code-head .lines {
+  font-size: 11px;
+  color: #8b949e;
+}
+.copy-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #c9d1d9;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, color 120ms ease;
+}
+.copy-btn:hover { background: rgba(255, 255, 255, 0.08); color: white; }
+.copy-btn.ok { color: var(--accent-success); border-color: var(--accent-success); }
+.code-card pre[class*="language-"] {
+  margin: 0;
+  padding: 14px 16px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.55;
+  border-radius: 0;
+  overflow: auto;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+.code-card pre[class*="language-"].line-numbers {
+  padding-left: 4em;
+}
+.code-card pre[class*="language-"] code {
+  background: transparent;
+  font-family: var(--font-mono);
+}
+.code-card .line-numbers .line-numbers-rows {
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0;
+}
+.code-card .line-numbers-rows > span::before {
+  color: #6e7681;
+}
+
+/* ============================================================
+   Callouts
+   ============================================================ */
+.callout {
+  margin: 20px 0;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+.callout > .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-bottom: 8px;
+}
+.callout > .callout-title .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--fg-muted);
+}
+.callout p:last-child { margin-bottom: 0; }
+.callout--warn { background: var(--bg-callout); border-color: var(--border-callout); }
+.callout--warn .callout-title { color: var(--accent-warm); }
+.callout--warn .dot { background: var(--accent-warm); }
+.callout--defensive { background: var(--bg-defensive); border-color: var(--border-defensive); }
+.callout--defensive .callout-title { color: var(--accent-danger); }
+.callout--defensive .dot { background: var(--accent-danger); }
+.callout--good { background: var(--bg-good); border-color: var(--border-good); }
+.callout--good .callout-title { color: var(--accent-success); }
+.callout--good .dot { background: var(--accent-success); }
+.callout--trap { background: var(--bg-trap); border-color: var(--border-trap); }
+.callout--trap .callout-title { color: var(--accent-danger); }
+.callout--trap .dot { background: var(--accent-danger); }
+
+/* Hero */
+.hero {
+  margin: 0 0 24px;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 50%),
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 50%),
+    var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+.hero h1 { margin-bottom: 0; }
+.tag-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 14px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-code);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+.tag--accent { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); border-color: transparent; }
+.tag--success { background: color-mix(in srgb, var(--accent-success) 15%, transparent); color: var(--accent-success); border-color: transparent; }
+
+/* ============================================================
+   Mermaid container
+   ============================================================ */
+.mermaid-card {
+  margin: 20px 0;
+  padding: 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+.mermaid-card .mermaid-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 12px;
+}
+.mermaid { display: flex; justify-content: center; }
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* ============================================================
+   FAQ / collapsibles
+   ============================================================ */
+details.qa {
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: border-color 120ms ease;
+}
+details.qa[open] { border-color: var(--border-strong); }
+details.qa > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 18px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--fg);
+}
+details.qa > summary::-webkit-details-marker { display: none; }
+details.qa > summary::before {
+  content: "+";
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent);
+  margin-top: -1px;
+  width: 18px;
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+details.qa[open] > summary::before { content: "−"; }
+details.qa .qa-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-code);
+  color: var(--fg-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+details.qa .qa-body {
+  padding: 0 18px 16px 46px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+details.qa .qa-body p:last-child { margin-bottom: 0; }
+
+/* Section group titles for cross-Q bank */
+.qa-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin: 24px 0 12px;
+}
+.qa-group-title .badge {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Step diagram for the 6-step orchestrator */
+.step-list {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 18px 0;
+  display: grid;
+  gap: 8px;
+}
+.step-list li {
+  counter-increment: step;
+  position: relative;
+  background: var(--bg-elev);
+  padding: 12px 14px 12px 48px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin: 0;
+}
+.step-list li::before {
+  content: counter(step);
+  position: absolute;
+  left: 12px; top: 50%;
+  transform: translateY(-50%);
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: grid; place-items: center;
+  font-weight: 700;
+  font-size: 12px;
+}
+.step-list li code { font-size: 12.5px; }
+
+/* Footer */
+footer.foot {
+  margin-top: 60px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--fg-subtle);
+  text-align: center;
+}
+
+/* Mobile */
+@media (max-width: 1024px) {
+  .layout { grid-template-columns: 1fr; padding: 20px 16px 60px; gap: 0; }
+  aside.toc { display: none; }
+  .topbar-inner { padding: 0 16px; }
+}
+
+/* Print */
+@media print {
+  header.topbar { display: none; }
+  aside.toc { display: none; }
+  .layout { grid-template-columns: 1fr; padding: 0; max-width: none; }
+  details.qa { break-inside: avoid; border: 0; box-shadow: none; }
+  details.qa[open] > summary::before, details.qa > summary::before { content: ""; width: 0; }
+  details.qa .qa-body { padding-left: 0; }
+  body { background: white; color: black; }
+  .code-card, .mermaid-card, .callout { box-shadow: none; break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+  h2, h3 { break-after: avoid; }
+}
+
+/* Auto-open all details on print */
+@media print {
+  details { display: block; }
+  details > summary { list-style: none; }
+  details:not([open]) > *:not(summary) { display: revert !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark">SM</span>
+      <span>State Machine Deep Dive</span>
+      <span class="brand-meta">DLS · Merchant Onboarding · Airtel prep</span>
+    </a>
+    <span class="spacer"></span>
+    <button class="text-btn" id="expandAll" title="Expand all questions">Expand all Q&amp;A</button>
+    <button class="text-btn" id="printBtn" title="Print this page">Print</button>
+    <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="toc" aria-label="Table of contents">
+    <p class="toc-title">On this page</p>
+    <ul id="toc"></ul>
+  </aside>
+
+  <main id="top">
+
+    <div class="hero">
+      <h1>State Machine + Merchant Onboarding
+        <span class="subtitle">Senior-IC mock-interview deep dive — anchored to <code>dgl-status</code> source</span>
+      </h1>
+      <div class="tag-row">
+        <span class="tag tag--accent">ApplicationStage enum</span>
+        <span class="tag tag--accent">A_APPLICATION_STAGE_TRACKER</span>
+        <span class="tag tag--accent">TriggerServiceImpl</span>
+        <span class="tag tag--success">30% onboarding-time reduction</span>
+        <span class="tag">Cross-Q bank: 36 Qs</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title"><span class="dot"></span> How to read this</div>
+      <p>Audience: senior backend interviewer at Airtel. The state machine is on your resume and partner triggers are how you defend the <strong>30% onboarding-time reduction</strong>. Every claim cites real code in <code>zipcredit-backend/dgl_base/dgl-status</code>. Cross-reference: defensive narrative for "Spring State Machine" in <code>04-resume-projects-deep-dive.md</code>; STAR-style "biggest production incident" in <code>03-behavioral-managerial-star-stories.md</code>.</p>
+    </div>
+
+    <h2 id="defensive-narrative">Defensive Narrative — Read First</h2>
+    <p>Five things you must say in the right shape if pressed. These are the lines that separate "I built it" from "I read about it".</p>
+    <div class="callout callout--defensive">
+      <div class="callout-title"><span class="dot"></span> If they push, lead with these exact framings</div>
+      <table>
+        <thead>
+          <tr><th>Probe</th><th>Wrong answer</th><th>Right answer</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>"Is this Spring State Machine?"</td>
+            <td>Hedge, look unsure</td>
+            <td>"No. Pragmatic state machine — <code>ApplicationStage</code> enum + <code>A_APPLICATION_STAGE_TRACKER</code> table + <code>TriggerServiceImpl</code>. I deliberately didn't use Spring State Machine because its state-action coupling didn't model partner-specific behaviour cleanly — same target stage means different downstream events for different partners (BharatPe vs PhonePe vs PayU). I needed (a) audit, (b) per-partner config, (c) re-entrancy on superseded callbacks. Three primitives gave me all three without the framework tax."</td>
+          </tr>
+          <tr>
+            <td>"60+ states sounds like too many"</td>
+            <td>Apologise / promise to refactor</td>
+            <td>"It's the actual state space. The enum defines ~280 entries spanning CKYC/OKYC/VKYC sub-flows, NACH (UPI/API/Physical), eligibility, document phases, APV, snail mail, CPV, NSP, GST/FSSAI, Udyam, PSL/risk tagging, and Pan-Aadhaar linkage. Per-channel, the practically-trafficked set is ~60 — that's the number on the resume. Collapsing them would lose audit fidelity that compliance + ops both depend on. Refactor would be UI-side grouping (CATEGORY → STAGE), not enum-side."</td>
+          </tr>
+          <tr>
+            <td>"Where's the audit trail?"</td>
+            <td>Mumble about logs</td>
+            <td>"<code>A_APPLICATION_STAGE_TRACKER</code> table — every transition is a new row with <code>prev_status</code>, <code>current_status</code>, <code>is_active</code>, <code>created_at</code>, <code>updated_at</code>. We never UPDATE existing rows for the status field; we INSERT a new row and flip <code>is_active=false</code> on the superseded one. So full history is queryable, partner re-entry is safe, and ops can reconstruct the timeline of any application."</td>
+          </tr>
+          <tr>
+            <td>"So you didn't enforce all transitions — what kind of state machine is that?"</td>
+            <td>Defensive</td>
+            <td>"Selective enforcement. <code>validateApplicationDetails</code> checks <code>from</code> and <code>required</code> preconditions for each event config — that's the strict path for downstream automation. The state recording itself is permissive because real-world callbacks arrive out of order (vendor webhook delays, retries) and we want the audit trail intact even when the trigger validations fail. <strong>Permissive recording + strict event-firing</strong> is the right split for a vendor-integrated lending pipeline."</td>
+          </tr>
+          <tr>
+            <td>"Did you build all of this?"</td>
+            <td>Over-claim</td>
+            <td>"It evolved over team development. The Meesho and PayU builders were earlier. I owned the trigger map design as it scaled to GPay TL, BharatPe, BharatPe TopUp, PhonePe TopUp, Swiggy EWI, and the NSP company/individual variants — that's where the partner-specific automation drove the 30% reduction. I also owned the dependent-stage deactivation pattern as we added APV, snail mail, and CKYC sub-flows."</td>
+          </tr>
+        </tbody>
+      </table>
+      <p><strong>Rule:</strong> Lead with the "three primitives" framing. Don't get baited into framework debate. If they push on Spring State Machine specifically, pivot: "I evaluated it. Spring SM models states as nodes with single-action edges; we needed N actions per edge keyed by partner. I'd have ended up with N state machines or a wrapper that re-implemented the same dispatch I built natively."</p>
+    </div>
+
+    <h2 id="pitch">60-Second Pitch <span class="tag" style="font-size:11px;vertical-align:middle;">memorize verbatim</span></h2>
+    <blockquote>
+      <p>"DLS is our loan-application orchestration platform. The state machine is pragmatic — <code>ApplicationStage</code> enum with ~280 stages (about 60 trafficked per channel), <code>A_APPLICATION_STAGE_TRACKER</code> for audit history, and <code>TriggerServiceImpl</code> driven by a <code>Map&lt;channelCode, Map&lt;targetStage, List&lt;EventConfig&gt;&gt;&gt;</code> so a new partner's automation is config, not code. Every stage transition flows through <code>ApplicationStatusServiceImpl.insertApplicationTracker</code> which deactivates conflicting dependent stages, persists a new tracker row, then fans out partner-specific event services via an <code>EnumMap</code>-backed factory — sync for ordering-critical events, async on a bounded executor for everything else. I deliberately chose this over Spring State Machine because its state-action coupling didn't model partner-specific behaviour. The trigger automation cut merchant onboarding time by 30% by replacing manual ops handoffs (LMS setup, document phase generation, partner approval callbacks, CAM report, CKYC upload, snail mail dispatch) with deterministic side-effects on the right stage transitions per partner."</p>
+    </blockquote>
+
+    <h2 id="mental-model">Mental Model — Three Primitives</h2>
+    <div class="mermaid-card">
+      <p class="mermaid-title">The dispatch flow</p>
+      <pre class="mermaid">
+flowchart LR
+    Caller[/"Any caller<br/>(KYC, NACH, Disbursement, Webhook)"/]
+    Caller -->|"insertApplicationTracker(appId, stage)"| Orchestrator["ApplicationStatusServiceImpl"]
+    Orchestrator -->|validates against| Enum["ApplicationStage<br/>(states)"]
+    Orchestrator -->|writes row| Tracker["A_APPLICATION_STAGE_TRACKER<br/>(history + audit)"]
+    Orchestrator -->|deactivates conflicts| Tracker
+    Orchestrator -->|"process(from, to, channelCode)"| Trigger["TriggerServiceImpl<br/>(side-effects per partner)"]
+    Trigger -->|lookup partnerStageEventConfigMap| EventFactory["EventServiceFactory"]
+    EventFactory -->|dispatch IEventService| Events["~70 EventType beans<br/>(sync or async)"]
+      </pre>
+    </div>
+    <p>The pitch line for this diagram: <strong>"states are an enum, transitions are recorded with audit, and side-effects fire from a partner-keyed config map."</strong></p>
+
+    <h4>Why this is "pragmatic" not "framework"</h4>
+    <ul>
+      <li><strong>No DSL</strong> — partner triggers are plain Java builders, reviewable in PR diff.</li>
+      <li><strong>No external library</strong> — only Spring DI + a <code>HashMap</code> of <code>EnumMap</code>.</li>
+      <li><strong>Mutation primitive is one method</strong> — <code>insertApplicationTracker</code>. There is no second way to change state.</li>
+      <li><strong>Side-effects are explicitly typed</strong> — <code>EventType</code> enum + <code>IEventService</code> interface, not arbitrary callbacks.</li>
+    </ul>
+
+    <h2 id="components">Component Walkthrough</h2>
+
+    <h3 id="c-stage">4a. <code>ApplicationStage</code> enum — the state space</h3>
+    <div class="code-card" data-lang="java">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">dgl_base/model/src/main/java/com/dgl/common/enums/ApplicationStage.java</span>
+        <span class="lines">L1–L30</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">package com.dgl.common.enums;
+
+public enum ApplicationStage {
+
+    CREATED,
+    APPLICANT_DETAIL_UPDATED,
+    COMPANY_DETAIL_UPDATED,
+    LOAN_DETAIL_UPDATED,
+    BANK_DETAIL_UPDATED,
+    BANK_DETAIL_VERIFIED_AND_UPDATED,
+    BANK_DETAIL_ADDED,
+
+    LOAN_CLOSED,
+    LOAN_REJECTED,
+    LOAN_OVERPAID,
+    LOAN_DECLINED_DEDUPE,
+    DROPPED,
+
+    SOFT_ELIGIBILITY_IN_PROGRESS,
+    SOFT_ELIGIBILITY_APPROVED,
+    SOFT_ELIGIBILITY_DECLINED,
+    SOFT_ELIGIBILITY_ERROR,
+
+    OFFERS_GENERATED,
+    OFFERS_ACCEPTED,
+    OFFERS_DECLINED,
+
+    CKYC_PULLED,
+    CKYC_FAILED,
+</code></pre>
+    </div>
+    <p>The enum is grouped by sub-flow:</p>
+    <table>
+      <thead><tr><th>Group</th><th>Examples</th><th>Why a sub-flow</th></tr></thead>
+      <tbody>
+        <tr><td>Lifecycle</td><td><code>CREATED</code>, <code>APPLICANT_DETAIL_UPDATED</code>, <code>LOAN_CLOSED</code>, <code>DROPPED</code></td><td>Top-level life cycle markers</td></tr>
+        <tr><td>Eligibility</td><td><code>SOFT_ELIGIBILITY_*</code>, <code>FINAL_ELIGIBILITY_*</code>, <code>RE_*</code></td><td>Two passes of credit eligibility, plus re-eligibility for renewals</td></tr>
+        <tr><td>CKYC (Central KYC)</td><td><code>CKYC_PULLED</code>, <code>CKYC_OTP_*</code>, <code>CKYC_DETAILS_MATCH_*</code>, <code>CKYC_CUSTOMER_ACCEPTED</code></td><td>Central KYC registry pull, OTP flow, customer accept/reject</td></tr>
+        <tr><td>OKYC (Aadhaar OKYC)</td><td><code>OKYC_OTP_*</code>, <code>OKYC_DETAILS_MATCH_*</code>, <code>DIGILOCKER_OKYC_*</code></td><td>Aadhaar OTP-based KYC + DigiLocker variant</td></tr>
+        <tr><td>VKYC (Video KYC)</td><td><code>VKYC_INITIATED</code>, <code>VKYC_USER_SCHEDULED</code>, <code>VKYC_MANUAL_APPROVED</code>, <code>VKYC_SKIPPED</code></td><td>RBI-mandated video KYC, with skip and manual review paths</td></tr>
+        <tr><td>Document phases</td><td><code>PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION</code> (and SUCCESS/FAILURE) × 4 phases</td><td>DocuSign-Carrier (DSC) notifications for sanction letter, KFS, MITC/GTC, LOA, post-disbursal docs</td></tr>
+        <tr><td>NACH</td><td><code>API_MANDATE_*</code>, <code>UPI_MANDATE_*</code>, <code>PHYSICAL_MANADATE_*</code>, <code>NACH_MANDATE_DETAILS_UPDATED</code></td><td>Three NACH mandate types via Digio</td></tr>
+        <tr><td>APV (Address Proof Verification)</td><td><code>INITIATE_APV</code>, <code>APV_APPROVED</code>, <code>APV_DECLINED</code>, <code>APV_NULL</code>, <code>APV_ERROR</code>, <code>APV_INELIGIBLE</code></td><td>Field investigation address proof; multiple terminal states because outcome can be "not found"</td></tr>
+        <tr><td>Snail mail</td><td><code>SNAILMAIL_INITIATED</code>, <code>SNAILMAIL_APPROVED</code>, <code>SNAILMAIL_DECLINED</code></td><td>Physical mail dispatch for stamp paper / signed documents</td></tr>
+        <tr><td>CPV (Customer Profile Verification)</td><td><code>CPV_INTIATED</code>, <code>CPV_APPROVED</code>, <code>CPV_DECLINED</code>, <code>CPV_SHOP_*</code></td><td>Shop verification for merchants (GPay merchant flow)</td></tr>
+        <tr><td>Approval</td><td><code>APPLICATION_APPROVED</code>, <code>APPLICATION_DECLINED</code>, <code>PARTNER_APPROVED</code>, <code>PARTNER_DECLINED</code></td><td>Internal approval + partner acknowledgement</td></tr>
+        <tr><td>Loan &amp; Disbursal</td><td><code>LOAN_REQUEST_SUCCESS</code>, <code>LOAN_DISBURSED</code>, <code>UTR_RECIEVED</code></td><td>LMS loan creation, disbursal, UTR (Unique Transaction Reference) confirmation</td></tr>
+        <tr><td>Compliance</td><td><code>RISK_CATEGORIZATION_*</code>, <code>PSL_TAGGING_*</code>, <code>BLACKLISTED</code>, <code>CKYC_NO_RECORD_FOUND</code></td><td>RBI risk scoring, Priority Sector Lending tagging</td></tr>
+        <tr><td>Pan-Aadhaar Linkage</td><td><code>PAN_LINKAGE_TRIGGERED</code>, <code>PAN_LINKAGE_APPROVED</code>, <code>PAN_LINKAGE_DECLINED</code>, <code>PAN_LINKAGE_SKIPPED</code>, <code>PAN_LINKAGE_FAILED</code></td><td>Mandatory linkage check, with skip path for legacy customers</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Why an enum, not a DB-driven state list?</h4>
+    <ul>
+      <li><strong>Compile-time safety</strong> — typo in a stage name fails the build, not at runtime in production.</li>
+      <li><strong>Exhaustive <code>switch</code> checking</strong> — IDE warns when a new stage isn't handled.</li>
+      <li><strong>Reviewable in PR</strong> — adding a stage is a code change with a Jira ticket; non-trivial, on purpose.</li>
+      <li><strong>EnumMap perf</strong> — backing maps use <code>EnumMap&lt;ApplicationStage, ...&gt;</code> for O(1) array-backed lookup, no hashing.</li>
+    </ul>
+    <p>The tradeoff: adding a stage requires a deploy. Acceptable because new stages are rare (≤1/quarter post-stabilization) and <em>behaviour</em> per partner lives in DB-driven config (<code>channel_code</code> lists), which IS hot-reloadable.</p>
+
+    <h3 id="c-tracker">4b. <code>A_APPLICATION_STAGE_TRACKER</code> — the audit table</h3>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">sql</span>
+        <span class="filepath">dgl_base/rdbms/.../UpgradeScriptV4.5_application_tracker.sql</span>
+        <span class="lines">L1–L9</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-sql">CREATE TABLE `A_APPLICATION_STAGE_TRACKER` (
+  `id` bigint NOT NULL AUTO_INCREMENT ,
+  `application_id` varchar(255) NOT NULL,
+  `tenant_id` int NOT NULL,
+  `prev_status` varchar(255) DEFAULT NULL,
+  `current_status` varchar(255) NOT NULL,
+  `last_updated_at` varchar(64) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ;
+</code></pre>
+    </div>
+    <p>The schema evolved with <code>is_active</code>, <code>type</code>, <code>type_id</code>, <code>created_at</code>, <code>updated_at</code> columns added later — visible in the actual mapper:</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">xml</span>
+        <span class="filepath">dgl_base/rdbms/.../ApplicationTrackerMapper.xml</span>
+        <span class="lines">L7–L13</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-markup">&lt;insert id='insertApplicationTracker' parameterType='map' useGeneratedKeys='true'&gt;
+    INSERT INTO
+    A_APPLICATION_STAGE_TRACKER (application_id, tenant_id,prev_status,current_status, type, type_id, is_active, created_at, updated_at)
+    VALUES
+    (
+    #{application_id}, #{tenant_id}, #{prev_status},#{current_status}, #{type}, #{type_id}, #{is_active}, #{created_at}, #{updated_at});
+&lt;/insert&gt;
+</code></pre>
+    </div>
+    <table>
+      <thead><tr><th>Column</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>application_id</code></td><td>Customer-facing application identifier (string, e.g. <code>APP-2024-0098765</code>)</td></tr>
+        <tr><td><code>tenant_id</code></td><td>Multi-tenancy partition — same code base serves multiple lending entities</td></tr>
+        <tr><td><code>prev_status</code></td><td>The stage we were AT just before this insert (denormalised for fast "current chain" reads)</td></tr>
+        <tr><td><code>current_status</code></td><td>The stage we entered</td></tr>
+        <tr><td><code>type</code></td><td>NSP variants: <code>INDIVIDUAL</code> or <code>COMPANY</code>. Nullable for SP (Sole Proprietorship) flows</td></tr>
+        <tr><td><code>type_id</code></td><td>FK to applicant or company entity — supports co-applicants (Company app has 1 company row + N individual rows tracking together)</td></tr>
+        <tr><td><code>is_active</code></td><td>The flag that makes this an audit table. New row → <code>true</code>. Conflicting rows → flipped to <code>false</code> on next transition</td></tr>
+        <tr><td><code>created_at</code>, <code>updated_at</code></td><td>Trail timestamps</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout--good">
+      <div class="callout-title"><span class="dot"></span> Why <code>is_active</code> instead of "just keep latest"?</div>
+      <ol>
+        <li><strong>Late callbacks</strong> — vendor webhook for <code>OKYC_DETAILS_MATCH_SUCCESS</code> arrives after we already moved to <code>FINAL_ELIGIBILITY_APPROVED</code>. We still record the row (audit) but it doesn't override the active state.</li>
+        <li><strong>Mutually exclusive outcomes</strong> — <code>FINAL_ELIGIBILITY_APPROVED</code> and <code>FINAL_ELIGIBILITY_DECLINED</code> can't both be active for one application. Inserting one deactivates the other.</li>
+        <li><strong>Re-entry / replay</strong> — if ops re-runs a stage manually (e.g. retry <code>LMS_CLIENT_SETUP</code>), the previous <code>LMS_CLIENT_SETUP_RETRY</code> row goes inactive and the new attempt starts a fresh trail.</li>
+      </ol>
+    </div>
+
+    <h3 id="c-orchestrator">4c. <code>insertApplicationTracker</code> — the orchestrator's heart</h3>
+    <p>This is the <strong>single mutation primitive</strong>. Every stage transition in the entire DLS goes through this method. It's defined in <code>ApplicationStatusServiceImpl</code>.</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">dgl_base/dgl-status/.../ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L232–L262</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">public boolean insertApplicationTracker(String applicationId, Integer tenantId, ApplicationStage currentStatus, String type, Long typeId) {
+    logger.info("Inside insertApplicationTracker service for application_id : {}, application_stage : {}, type : {}, type_id: {}", applicationId, currentStatus, type, typeId);
+    type = StringUtils.isNotBlank(type) ? type.toUpperCase() : type;
+    if(Objects.isNull(currentStatus)) return false;
+    String applicationType = initDependentStagesMap(applicationId, tenantId);
+    if(Objects.isNull(applicationType)) return false;
+
+    String uuid = null;
+    if(applicationType.equalsIgnoreCase(Constants.COMPANY)){
+        if (typeId == null) return false;
+        uuid = getUuidByTypeId(type,typeId,applicationId);
+        if(uuid == null) return false;
+    }
+
+    logger.info("UUID: {} " , uuid);
+    try {
+        ApplicationBean application = getApplicationDetails(applicationId, tenantId);
+        markcurrentStatusInActiveIfAlreadyAvailable(applicationId, tenantId, currentStatus, type, typeId);
+        String prevStatus = getPrevStatus(applicationId, tenantId, type, typeId);
+        disablePreviousDependentStatuses(applicationId, tenantId, currentStatus, application, type, typeId);
+        saveCurrentStatus(applicationId, tenantId, currentStatus, prevStatus, type, typeId);
+        logger.info("Processing triggers");
+        processTriggers(applicationId, tenantId, currentStatus, prevStatus, type, typeId, uuid);
+        if(!Objects.equals(type, Constants.INDIVIDUAL)) updateAdminCaseStatus(applicationId, tenantId, currentStatus);
+        processPartnerStatusAndNotification(application,currentStatus);
+        return true;
+    } catch (Exception e) {
+        logger.error("Error in updating application tracker status for application_id {}", applicationId, e);
+    }
+    return false;
+}
+</code></pre>
+    </div>
+
+    <h4>The 6-step flow (memorize this)</h4>
+    <ol class="step-list">
+      <li><code>markcurrentStatusInActiveIfAlreadyAvailable</code> — idempotency: deactivate any prior row with same status</li>
+      <li><code>getPrevStatus</code> — read latest active for the <code>prev_status</code> column</li>
+      <li><code>disablePreviousDependentStatuses</code> — flip <code>is_active=false</code> on conflicting stages</li>
+      <li><code>saveCurrentStatus</code> — INSERT new row, <code>is_active=true</code></li>
+      <li><code>processTriggers</code> — fire partner-specific automations via <code>TriggerServiceImpl</code></li>
+      <li><code>updateAdminCaseStatus</code> + <code>processPartnerStatusAndNotification</code> — admin UI sync + outbound partner callback</li>
+    </ol>
+
+    <div class="mermaid-card">
+      <p class="mermaid-title">insertApplicationTracker control flow</p>
+      <pre class="mermaid">
+flowchart TD
+    Start["insertApplicationTracker(appId, tenant, currentStatus, type, typeId)"] --> S0["initDependentStagesMap<br/>(lazy bootstrap)"]
+    S0 --> S1["markcurrentStatusInActiveIfAlreadyAvailable"]
+    S1 --> S2["getPrevStatus"]
+    S2 --> S3["disablePreviousDependentStatuses"]
+    S3 --> S4["saveCurrentStatus<br/>(INSERT row, is_active=true)"]
+    S4 --> S5["processTriggers<br/>(TriggerServiceImpl)"]
+    S5 --> S6["updateAdminCaseStatus +<br/>processPartnerStatusAndNotification"]
+    S6 --> End[/return true/]
+      </pre>
+    </div>
+
+    <h4>Step 1 — <code>markcurrentStatusInActiveIfAlreadyAvailable</code></h4>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L436–L445</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void markcurrentStatusInActiveIfAlreadyAvailable(String applicationId, Integer tenantId, ApplicationStage currentStatus,
+                                                         String type, Long typeId)
+        throws SQLException {
+    ApplicationTrackerBean trackerBean = applicationTrackerService
+            .selectApplicationTrackerLatestByCurrentStatus(applicationId, tenantId,
+                    String.valueOf(currentStatus), type, typeId);
+    if (Objects.nonNull(trackerBean)) {
+        applicationTrackerService.update(trackerBean.getId(), false, Date.from(Instant.now()), type, typeId);
+    }
+}
+</code></pre>
+    </div>
+    <p>This handles <strong>re-entry idempotency</strong>. If the same stage is being entered again (retry, replay), the old row is deactivated first so we don't have two active rows for the same stage.</p>
+
+    <h4>Step 3 — <code>disablePreviousDependentStatuses</code> (the "deactivate conflicts" pass)</h4>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L316–L326</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void disablePreviousDependentStatuses(String applicationId, Integer tenantId,
+        ApplicationStage currentStatus, ApplicationBean applicationBean, String type, Long typeId) {
+    if(validateIfDependentStateExists(currentStatus, applicationBean)) return;
+
+    List&lt;ApplicationStage&gt; dependentStages = dependentStagesMap.get(applicationBean.getChannel_code()).get(currentStatus);
+    List&lt;String&gt; statuses = dependentStages.stream().map(Enum::toString).collect(Collectors.toList());
+
+    if(CollectionUtils.isNotEmpty(statuses))
+        applicationTrackerService.updateIsActiveAndUpdatedAtByApplicationIdAndStatusIn(false, Date.from(Instant.now()), applicationId, tenantId, statuses, type, typeId);
+}
+</code></pre>
+    </div>
+    <p>Single bulk UPDATE: <code>is_active=false</code> for all rows whose <code>current_status IN (dependent stages)</code> for this application. Examples:</p>
+    <ul>
+      <li>Inserting <code>FINAL_ELIGIBILITY_APPROVED</code> → deactivate active <code>FINAL_ELIGIBILITY_DECLINED</code>, <code>FINAL_ELIGIBILITY_ERROR</code>, <code>FINAL_ELIGIBILITY_IN_PROGRESS</code> rows.</li>
+      <li>Inserting <code>SELFIE_MATCH_SUCCESS</code> → deactivate <code>SELFIE_MATCH_FAILED</code>.</li>
+      <li>Inserting <code>APV_APPROVED</code> → deactivate <code>APV_DECLINED</code>, <code>APV_NULL</code>, <code>APV_ERROR</code>, <code>APV_INELIGIBLE</code>.</li>
+    </ul>
+
+    <h4>Step 5 — <code>processTriggers</code></h4>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L411–L421</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void processTriggers(String applicationId, Integer tenantId, ApplicationStage currentStatus,
+                             String prevStatus, String type, Long typeId, String uuid) {
+    try {
+        logger.info("Inside Process Triggers for stage {}", currentStatus);
+        ApplicationStage prevStage = EnumUtils.isValidEnum(ApplicationStage.class, prevStatus) ? ApplicationStage.valueOf(prevStatus) : null;
+        triggerService.process(prevStage, currentStatus, applicationId, tenantId, type, typeId, uuid);
+    } catch (Exception e) {
+        logger.error("Exception in executing trigger for application tracker status {} for application_id {}", currentStatus, applicationId, e);
+    }
+}
+</code></pre>
+    </div>
+    <div class="callout callout--warn">
+      <div class="callout-title"><span class="dot"></span> Why the try/catch matters</div>
+      <p>A trigger failure does <strong>not</strong> invalidate the recorded state. The audit row is already saved by the time we get here. Failed triggers are recoverable via cron sweepers (e.g. <code>LMS_CLIENT_SETUP_RETRY</code> is itself a stage that ops/automation can drive).</p>
+    </div>
+
+    <h3 id="c-dependent">4d. Dependent Stages Map — partner-specific mutual exclusion</h3>
+    <p>Built once per channel via lazy double-checked init:</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L145–L163</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void initSpDependentStagesMap(Integer tenantId) {
+    if (dependentStagesMap.isEmpty()) {
+        synchronized (this) {
+            if (dependentStagesMap.isEmpty()) {
+                getDependentStageList(tenantId).forEach(dependentStage -&gt; {
+                    Map&lt;ApplicationStage, List&lt;ApplicationStage&gt;&gt; dependentStageChannelMap = dependentStagesMap
+                            .getOrDefault(dependentStage.getChannelCode(), new EnumMap&lt;&gt;(ApplicationStage.class));
+
+                    List&lt;ApplicationStage&gt; dependentStageList = dependentStageChannelMap.
+                            getOrDefault(dependentStage.getApplicationStage(), new ArrayList&lt;&gt;());
+
+                    dependentStageList.addAll(dependentStage.getDependentStages());
+                    dependentStageChannelMap.put(dependentStage.getApplicationStage(), dependentStageList);
+                    dependentStagesMap.put(dependentStage.getChannelCode(), dependentStageChannelMap);
+                });
+            }
+        }
+    }
+}
+</code></pre>
+    </div>
+    <p>Shape: <code>Map&lt;String channelCode, Map&lt;ApplicationStage, List&lt;ApplicationStage&gt;&gt;&gt;</code>.</p>
+    <p>Each partner has its own builder (<code>getMeeshoDependentStageList</code>, <code>getPhonePeDependentStageList</code>, etc.) that registers mutual-exclusion rules. The CKYC group is the densest — <code>setCKYCDependentStages</code> covers 14 mutual-exclusion rules. APV is a 6-state group with full mutual exclusion:</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">ApplicationStatusServiceImpl.java</span>
+        <span class="lines">L1134–L1142</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void setAPVDependentStages(List&lt;DependentStage&gt; dependentStageList, String channelCode) {
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.INITIATE_APV, Arrays.asList(ApplicationStage.APV_APPROVED,ApplicationStage.APV_DECLINED,ApplicationStage.APV_NULL,ApplicationStage.APV_ERROR,ApplicationStage.APV_INELIGIBLE)));
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.APV_APPROVED,Arrays.asList(ApplicationStage.APV_DECLINED,ApplicationStage.APV_NULL,ApplicationStage.APV_ERROR,ApplicationStage.APV_INELIGIBLE)));
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.APV_DECLINED,Arrays.asList(ApplicationStage.APV_APPROVED,ApplicationStage.APV_NULL,ApplicationStage.APV_ERROR,ApplicationStage.APV_INELIGIBLE)));
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.APV_NULL,Arrays.asList(ApplicationStage.APV_APPROVED,ApplicationStage.APV_DECLINED,ApplicationStage.APV_ERROR,ApplicationStage.APV_INELIGIBLE)));
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.APV_ERROR,Arrays.asList(ApplicationStage.APV_APPROVED,ApplicationStage.APV_DECLINED,ApplicationStage.APV_NULL,ApplicationStage.APV_INELIGIBLE)));
+    dependentStageList.add(getDependentStage(channelCode,ApplicationStage.APV_INELIGIBLE,Arrays.asList(ApplicationStage.APV_APPROVED,ApplicationStage.APV_DECLINED,ApplicationStage.APV_ERROR,ApplicationStage.APV_NULL)));
+}
+</code></pre>
+    </div>
+
+    <h3 id="c-trigger-map"><code>partnerStageEventConfigMap</code> — the trigger registry</h3>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L45</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">final Map&lt;String , Map&lt;ApplicationStage, List&lt;EventConfig&gt;&gt;&gt; partnerStageEventConfigMap;
+</code></pre>
+    </div>
+    <p>Shape: <code>Map&lt;channelKey, Map&lt;targetStage, List&lt;EventConfig&gt;&gt;&gt;</code>, where <code>channelKey = channelCode + "_" + nspType</code> (or just <code>channelCode</code> for SP flows).</p>
+
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L67–L86</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void initTriggerEventList(Integer tenantId) {
+    if (partnerStageEventConfigMap.isEmpty()) {
+        synchronized (this) {
+            if (partnerStageEventConfigMap.isEmpty()) {
+                getTriggerEventConfigList(tenantId).forEach(eventConfig -&gt; {
+                    String channelKey = eventConfig.getChannelCode() + (eventConfig.getNspType() != null ? "_" +
+                            eventConfig.getNspType() : "");
+                    Map&lt;ApplicationStage, List&lt;EventConfig&gt;&gt; stageEventConfigMap = partnerStageEventConfigMap.getOrDefault(channelKey,
+                            new EnumMap&lt;&gt;(ApplicationStage.class));
+                    List&lt;EventConfig&gt; eventConfigList = stageEventConfigMap.getOrDefault(eventConfig.getTo(), new ArrayList&lt;&gt;());
+                    eventConfigList.add(eventConfig);
+                    stageEventConfigMap.put(eventConfig.getTo(), eventConfigList);
+                    partnerStageEventConfigMap.put(channelKey, stageEventConfigMap);
+                });
+            }
+        }
+    }
+}
+</code></pre>
+    </div>
+
+    <h4>15 partner builders feed the registry</h4>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L89–L108</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private List&lt;EventConfig&gt; getTriggerEventConfigList(Integer tenantId) {
+    List&lt;EventConfig&gt; eventConfigList = new ArrayList&lt;&gt;();
+    eventConfigList.addAll(getMeeshoEventConfigList(tenantId));
+    eventConfigList.addAll(getPhonePeEventConfigList(tenantId));
+    eventConfigList.addAll(getPhonePeTopUpEventConfigList(tenantId));
+    eventConfigList.addAll(getBharatPeEventConfigList(tenantId));
+    eventConfigList.addAll(getPaytmEventConfigList(tenantId));
+    eventConfigList.addAll(getPayuEventConfigList(tenantId));
+    eventConfigList.addAll(getMeeshoBankingEventConfigList(tenantId));
+    eventConfigList.addAll(getPayuTlConfigList(tenantId));
+    eventConfigList.addAll(getPayuRenewableEventConfigList(tenantId));
+    eventConfigList.addAll(getMeeshoCliEventConfigList(tenantId));
+    eventConfigList.addAll(getNspCompanyEventConfigList(tenantId));
+    eventConfigList.addAll(getNspIndividualEventConfigList(tenantId));
+    eventConfigList.addAll(getSwiggyEwiEventConfigList(tenantId));
+    eventConfigList.addAll(getBharatPeTopUpEventConfigList(tenantId));
+    eventConfigList.addAll(getGpayTermLoanEventConfigList(tenantId));
+    return eventConfigList;
+}
+</code></pre>
+    </div>
+
+    <p><code>EventConfig</code> is the metadata record:</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">EventConfig.java</span>
+        <span class="lines">L14–L26</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">@Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+public class EventConfig {
+    private ApplicationStage from;
+    private ApplicationStage to;
+    private boolean isAsync;
+    private List&lt;ApplicationStage&gt; required;
+    private EventType eventType;
+    private String channelCode;
+    private String nspType;
+}
+</code></pre>
+    </div>
+    <table>
+      <thead><tr><th>Field</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>from</code></td><td>Optional precondition: stage we must transition FROM. Null = "fire on <code>to</code> regardless of source".</td></tr>
+        <tr><td><code>to</code></td><td>The trigger key — the stage whose entry fires this event.</td></tr>
+        <tr><td><code>isAsync</code></td><td><code>true</code> → run on <code>taskExecutor</code>; <code>false</code> → run inline.</td></tr>
+        <tr><td><code>required</code></td><td>Optional list of stages that must already be complete (in tracker) before firing.</td></tr>
+        <tr><td><code>eventType</code></td><td>The <code>EventType</code> enum entry — looked up in <code>EventServiceFactory</code>.</td></tr>
+        <tr><td><code>channelCode</code></td><td>Partner channel code (e.g. <code>BHARATPE_ORG</code>, <code>PHONEPE_TL</code>).</td></tr>
+        <tr><td><code>nspType</code></td><td>NSP variant: <code>INDIVIDUAL</code> or <code>COMPANY</code>, null for SP.</td></tr>
+      </tbody>
+    </table>
+
+    <p>The same target stage <code>LMS_CLIENT_SETUP_COMPLETED</code> fires <em>different</em> events for Meesho vs BharatPe — that's exactly why Spring State Machine's state-action coupling didn't fit:</p>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L536–L540 (Meesho)</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">eventConfigList.add(createEventConfig(null, ApplicationStage.LMS_CLIENT_SETUP_COMPLETED, true, null,
+        EventType.PARTNER_APPLICATION_APPROVED_CALLBACK, channelCode));
+eventConfigList.add(createEventConfig(null, ApplicationStage.LMS_CLIENT_SETUP_COMPLETED, true, null,
+        EventType.PHASE_THREE_DOCUMENTS_GENERATE_DSC_NOTIFICATION, channelCode));
+</code></pre>
+    </div>
+    <p>Meesho fires <em>two</em> events on <code>LMS_CLIENT_SETUP_COMPLETED</code>; BharatPe fires one. Same stage, different per-partner side-effects.</p>
+
+    <h3 id="c-dispatcher">4f. <code>TriggerServiceImpl.process</code> — the dispatcher</h3>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L1308–L1325</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">@Override
+public void process(ApplicationStage from, ApplicationStage to, String applicationId, Integer tenantId, String type, Long typeId, String uuid) {
+    logger.info("Inside Trigger Service Process for Stage {}", to);
+    ApplicationBean application = getApplication(applicationId, tenantId);
+
+    if (Objects.isNull(application) || Objects.isNull(application.getChannel_code())) {
+        logger.error("Application or Channel Code not available for applicationId {}", applicationId);
+        return;
+    }
+
+    initTriggerEventList(tenantId);
+
+    String channelKey = application.getChannel_code() + (type != null ? "_" + type : "");
+    if (Objects.isNull(partnerStageEventConfigMap.get(channelKey)) || CollectionUtils.isEmpty(partnerStageEventConfigMap.get(channelKey).get(to)))
+        return;
+
+    processEvents(from, to, applicationId, tenantId, application, type, typeId, uuid, channelKey);
+}
+</code></pre>
+    </div>
+
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">TriggerServiceImpl.java</span>
+        <span class="lines">L1327–L1357</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">private void processEvents(ApplicationStage from, ApplicationStage to, String applicationId, Integer tenantId,
+                           ApplicationBean application, String type, Long typeId, String uuid, String channelKey) {
+    ApplicationDetailsDTO applicationDetails = null;
+    for(EventConfig eventConfig : partnerStageEventConfigMap.get(channelKey).get(to)) {
+        logger.info("Trigger event for eventType {} for application id {} current status {}", eventConfig.getEventType(), applicationId, to);
+        if(Objects.isNull(applicationDetails)) {
+            applicationDetails = prepareAndGetApplicationDetailsDTO(application, applicationId, tenantId, type, typeId);
+            if(Objects.isNull(applicationDetails)) {
+                logger.error("Error in executing trigger for application tracker status {} for application_id {}", to, applicationId);
+                return;
+            }
+            applicationDetails.setCurrentApplicationStatus(to);
+            applicationDetails.setType(type);
+            applicationDetails.setTypeId(typeId);
+            applicationDetails.setUuid(uuid);
+        }
+
+        if (validateApplicationDetails(from, applicationDetails, eventConfig)) {
+            IEventService eventService = eventServiceFactory.get(eventConfig.getEventType());
+            if (eventConfig.isAsync()) {
+                final ApplicationDetailsDTO applicationDetailsFinal = applicationDetails;
+                CompletableFuture.runAsync(()-&gt; eventService.process(applicationDetailsFinal), taskExecutor);
+            } else {
+                eventService.process(applicationDetails);
+            }
+        }
+        else {
+            logger.info("Validation failed for application id {} current status{} skipping event for eventType {}", applicationId, to, eventConfig.getEventType());
+        }
+    }
+}
+</code></pre>
+    </div>
+
+    <ul>
+      <li><strong><code>ApplicationDetailsDTO</code> is built once and reused</strong> across all event configs for this transition (lazy <code>if (Objects.isNull(applicationDetails))</code>). Saves repeated DB reads.</li>
+      <li><strong>Validation gates each event</strong> — <code>validateApplicationDetails</code> checks <code>from</code> and <code>required</code> preconditions against the application's complete stage history.</li>
+      <li><strong>Async/sync dispatch is per-event</strong> — sync events block, async events go to a Spring <code>TaskExecutor</code>.</li>
+    </ul>
+
+    <h3 id="c-async">4g. Async vs Sync — why the split matters</h3>
+    <table>
+      <thead><tr><th>Mode</th><th>When to use</th><th>Examples</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Sync</strong></td>
+          <td>The next stage transition depends on the side-effect completing first.</td>
+          <td><code>MARK_APPLICATION_APPROVED_BHARATPE</code> on <code>NACH_MANDATE_DETAILS_UPDATED</code>; <code>PAYU_SETTLEMENT_ACCOUNT_SWAP</code> on <code>LOA_SIGNED</code></td>
+        </tr>
+        <tr>
+          <td><strong>Async</strong></td>
+          <td>Fire-and-forget, no downstream stage depends on it completing.</td>
+          <td><code>PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION</code>, <code>USER_LEVEL_KYC_UPDATION</code>, <code>SEND_SMS_*</code>, <code>GENERATE_CAM_REPORT</code>, <code>FETCH_POLICY_CERTIFICATE</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Backed by a dedicated Spring <code>TaskExecutor</code> wired via <code>@Qualifier("eventThreadPoolExecutor")</code>.</p>
+
+    <h3 id="c-factory">4h. <code>EventServiceFactory</code> — Spring DI registry</h3>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">java</span>
+        <span class="filepath">EventServiceFactory.java</span>
+        <span class="lines">L13–L30</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-java">@Component
+public class EventServiceFactory {
+
+    private final Map&lt;EventType, IEventService&gt; eventServiceProvider;
+
+    @Autowired
+    public EventServiceFactory(List&lt;IEventService&gt; eventServices) {
+        eventServiceProvider = new EnumMap&lt;&gt;(EventType.class);
+        eventServices.stream().forEach(eventService -&gt; {
+            eventServiceProvider.put(eventService.getEventType(), eventService);
+        });
+    }
+
+    public IEventService get(EventType eventType) {
+        return eventServiceProvider.get(eventType);
+    }
+}
+</code></pre>
+    </div>
+    <ul>
+      <li>Inject <code>List&lt;IEventService&gt;</code> — Spring autowires every bean implementing the interface.</li>
+      <li>Each service self-registers by returning its <code>EventType</code> from <code>getEventType()</code>.</li>
+      <li>Storage is <code>EnumMap</code> — array-backed, branch-free lookup.</li>
+    </ul>
+
+    <h3 id="c-module">4i. <code>dgl-status</code> Maven module — the boundary</h3>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">plaintext</span>
+        <span class="filepath">module structure</span>
+        <span class="lines">overview</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-plaintext">dgl-status/
+├── src/main/java/com/dgl/status/
+│   ├── services/
+│   │   ├── IApplicationStatusService.java     # public contract
+│   │   ├── ITriggerService.java               # trigger contract
+│   │   └── impl/
+│   │       ├── ApplicationStatusServiceImpl.java   # the orchestrator
+│   │       ├── TriggerServiceImpl.java             # the dispatcher
+│   │       └── {Partner}ApplicationStatus.java     # per-partner status builders
+│   ├── event/
+│   │   ├── factory/EventServiceFactory.java
+│   │   └── services/
+│   │       ├── IEventService.java
+│   │       └── impl/                          # 50+ IEventService implementations
+│   ├── enums/EventType.java
+│   ├── models/EventConfig.java
+│   ├── models/DependentStage.java
+│   ├── dto/ApplicationDetailsDTO.java
+│   └── utils/ApplicationStageTrackerUtility.java
+└── pom.xml
+</code></pre>
+    </div>
+    <ul>
+      <li><strong>Single mutation chokepoint</strong> — anything that changes application state imports <code>dgl-status</code> and calls <code>insertApplicationTracker</code>.</li>
+      <li><strong>Trigger logic is colocated with state changes</strong> — adding a side-effect for a stage transition is one builder edit + one event service bean, both inside <code>dgl-status</code>.</li>
+      <li><strong>Dependency direction is clean</strong> — higher-level modules import <code>dgl-status</code>; <code>dgl-status</code> doesn't import them.</li>
+    </ul>
+
+    <h2 id="journey">End-to-End Merchant Onboarding Journey (BharatPe)</h2>
+    <p>Pick BharatPe because it covers the densest set of triggers: KYC + DigiLocker + final eligibility + approval + multiple document phases + LMS setup + partner callback + post-disbursal phase + risk categorization + APV + CAM report.</p>
+
+    <div class="mermaid-card">
+      <p class="mermaid-title">Sequence — from lead to disbursed (BharatPe)</p>
+      <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor M as Merchant
+    participant App as DLS Frontend
+    participant Status as ApplicationStatusServiceImpl
+    participant Tracker as A_APPLICATION_STAGE_TRACKER
+    participant Trigger as TriggerServiceImpl
+    participant Factory as EventServiceFactory
+    participant Event as IEventService impl
+    participant BPE as BharatPe API
+    participant LMS as Finflux LMS
+    participant Digio as Digio NACH
+
+    M->>App: Apply for loan
+    App->>Status: insertApplicationTracker(CREATED)
+    Status->>Tracker: INSERT current=CREATED is_active=true
+    Status->>Trigger: process(null, CREATED)
+    Trigger-->>Status: no triggers registered
+
+    Note over App,Status: KYC sub-flow (CKYC + OKYC + Selfie)
+    App->>Status: insertApplicationTracker(SELFIE_MATCH_SUCCESS)
+    Status->>Tracker: deactivate SELFIE_MATCH_FAILED, INSERT new row
+    Status->>Trigger: process(SELFIE_UPLOADED, SELFIE_MATCH_SUCCESS)
+    Trigger->>Factory: get(KYC_SUCCESS_CALLBACK)
+    Trigger->>Factory: get(USER_LEVEL_KYC_UPDATION)
+    Factory->>Event: process(applicationDetails) async
+    Event->>BPE: notify KYC success
+
+    Note over App,Status: Final eligibility decision
+    App->>Status: insertApplicationTracker(FINAL_ELIGIBILITY_APPROVED)
+    Status->>Tracker: deactivate FINAL_ELIGIBILITY_DECLINED, INSERT
+
+    Note over App,Status: Partner approves
+    BPE->>App: webhook PARTNER_APPROVED
+    App->>Status: insertApplicationTracker(PARTNER_APPROVED)
+    Status->>Trigger: process(FINAL_ELIGIBILITY_APPROVED, PARTNER_APPROVED)
+    Trigger->>Event: MARK_APPLICATION_APPROVED_BHARATPE (sync)
+    Event->>BPE: confirm + commit ledger
+    Trigger->>Event: TRIGGER_SNAIL_MAIL (sync)
+    Event->>Event: dispatch physical mail
+
+    Note over App,Status: NACH mandate
+    Digio->>App: webhook NACH_MANDATE_DETAILS_UPDATED
+    App->>Status: insertApplicationTracker(NACH_MANDATE_DETAILS_UPDATED)
+    Status->>Trigger: process
+    Trigger->>Event: MARK_APPLICATION_APPROVED_BHARATPE (sync, idempotent)
+    Trigger->>Event: DISABLE_CIBIL_EXPIRY (async)
+
+    Note over App,Status: Internal approval kicks off doc + LMS chain
+    App->>Status: insertApplicationTracker(APPLICATION_APPROVED)
+    Status->>Trigger: process
+    Trigger->>Event: PHASE_ONE_DOCUMENTS_... (async)
+    Trigger->>Event: REGISTER_USER_FOR_UCIN (async)
+    Trigger->>Event: CREATE_CKYC_UPLOAD_ENTRY (async)
+    Trigger->>Event: RISK_CATEGORIZATION (async)
+    Event-->>Status: insertApplicationTracker(PHASE_ONE_..._SUCCESS)
+    Status->>Trigger: process(_, PHASE_ONE_..._SUCCESS)
+    Trigger->>Event: PHASE_TWO_DOCUMENTS_... (async)
+    Event-->>Status: insertApplicationTracker(PHASE_TWO_..._SUCCESS)
+    Status->>Trigger: process
+    Trigger->>Event: LMS_CLIENT_SETUP (async)
+    Event->>LMS: client setup
+    LMS-->>Status: insertApplicationTracker(LMS_CLIENT_SETUP_COMPLETED)
+    Status->>Trigger: process
+    Trigger->>Event: PARTNER_APPLICATION_APPROVED_CALLBACK (async)
+    Trigger->>Event: USER_LEVEL_KYC_UPDATION (async)
+    Event->>BPE: callback "approved"
+
+    Note over App,Status: Disbursement
+    LMS-->>Status: insertApplicationTracker(LOAN_REQUEST_SUCCESS)
+    Status->>Trigger: process
+    Trigger->>Event: LOAN_MANDATE_ASSOCIATION (async)
+    LMS-->>Status: insertApplicationTracker(UTR_RECIEVED)
+    Status->>Trigger: process
+    Trigger->>Event: PHASE_FOUR_DOCUMENTS_... (async)
+    Trigger->>Event: FETCH_POLICY_CERTIFICATE (async)
+    Status-->>M: Disbursed
+      </pre>
+    </div>
+
+    <div class="mermaid-card">
+      <p class="mermaid-title">State diagram — dependent-stage deactivation lanes</p>
+      <pre class="mermaid">
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> SOFT_ELIGIBILITY_IN_PROGRESS
+    SOFT_ELIGIBILITY_IN_PROGRESS --> SOFT_ELIGIBILITY_APPROVED
+    SOFT_ELIGIBILITY_IN_PROGRESS --> SOFT_ELIGIBILITY_DECLINED
+    SOFT_ELIGIBILITY_APPROVED --> OFFERS_GENERATED
+    OFFERS_GENERATED --> OFFERS_ACCEPTED
+    OFFERS_ACCEPTED --> CKYC_PULLED
+    CKYC_PULLED --> CKYC_DETAILS_MATCH_SUCCESS
+    CKYC_PULLED --> CKYC_DETAILS_MATCH_FAILED
+    CKYC_DETAILS_MATCH_SUCCESS --> SELFIE_UPLOADED
+    SELFIE_UPLOADED --> SELFIE_MATCH_SUCCESS
+    SELFIE_UPLOADED --> SELFIE_MATCH_FAILED
+    SELFIE_MATCH_FAILED --> SELFIE_UPLOADED: retry
+    SELFIE_MATCH_SUCCESS --> DIGILOCKER_OKYC_FILE_UPLOADED
+    DIGILOCKER_OKYC_FILE_UPLOADED --> DIGILOCKER_OKYC_MATCH_SUCCESS
+    DIGILOCKER_OKYC_MATCH_SUCCESS --> FINAL_ELIGIBILITY_IN_PROGRESS
+    FINAL_ELIGIBILITY_IN_PROGRESS --> FINAL_ELIGIBILITY_APPROVED
+    FINAL_ELIGIBILITY_IN_PROGRESS --> FINAL_ELIGIBILITY_DECLINED
+    FINAL_ELIGIBILITY_APPROVED --> PARTNER_APPROVED
+    PARTNER_APPROVED --> NACH_MANDATE_DETAILS_UPDATED
+    NACH_MANDATE_DETAILS_UPDATED --> APPLICATION_APPROVED
+    APPLICATION_APPROVED --> PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION
+    PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION --> PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION_SUCCESS
+    PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION_SUCCESS --> PHASE_TWO_DOCUMENTS_GENERATE_DSC_NOTIFICATION
+    PHASE_TWO_DOCUMENTS_GENERATE_DSC_NOTIFICATION --> PHASE_TWO_DOCUMENTS_GENERATE_DSC_NOTIFICATION_SUCCESS
+    PHASE_TWO_DOCUMENTS_GENERATE_DSC_NOTIFICATION_SUCCESS --> LMS_CLIENT_SETUP_COMPLETED
+    LMS_CLIENT_SETUP_COMPLETED --> LOAN_REQUEST_SUCCESS
+    LOAN_REQUEST_SUCCESS --> UTR_RECIEVED
+    UTR_RECIEVED --> [*]: Loan Disbursed
+      </pre>
+    </div>
+
+    <h2 id="reduction">The 30% Onboarding-Time Reduction — How To Defend It</h2>
+
+    <h4>What "onboarding time" means</h4>
+    <blockquote><p>Median time from <code>CREATED</code> to <code>UTR_RECIEVED</code> for a merchant on a given partner channel, measured per-application from <code>A_APPLICATION_STAGE_TRACKER</code> timestamps.</p></blockquote>
+
+    <h4>Reproducible query (illustrative)</h4>
+    <div class="code-card">
+      <div class="code-head">
+        <span class="lang">sql</span>
+        <span class="filepath">analytics — illustrative</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+<pre class="line-numbers"><code class="language-sql">-- Median onboarding time per channel, last 30 days
+SELECT
+  app.channel_code,
+  AVG(TIMESTAMPDIFF(MINUTE, t_start.created_at, t_end.created_at)) AS avg_minutes
+FROM application app
+JOIN A_APPLICATION_STAGE_TRACKER t_start
+  ON t_start.application_id = app.application_id
+ AND t_start.current_status = 'CREATED'
+ AND t_start.is_active = true
+JOIN A_APPLICATION_STAGE_TRACKER t_end
+  ON t_end.application_id = app.application_id
+ AND t_end.current_status = 'UTR_RECIEVED'
+ AND t_end.is_active = true
+WHERE app.created_at &gt;= NOW() - INTERVAL 30 DAY
+GROUP BY app.channel_code;
+</code></pre>
+    </div>
+
+    <h4>What was manual <em>before</em> the trigger map matured</h4>
+    <table>
+      <thead><tr><th>Step</th><th>What ops did</th><th>Now automated by EventType</th></tr></thead>
+      <tbody>
+        <tr><td>Notify partner of approval</td><td>API call to partner's "mark approved" endpoint</td><td><code>MARK_APPLICATION_APPROVED_{PARTNER}</code></td></tr>
+        <tr><td>Trigger physical mail dispatch</td><td>Email vendor with stamp paper request</td><td><code>TRIGGER_SNAIL_MAIL</code></td></tr>
+        <tr><td>LMS client setup</td><td>Finflux web UI / manual JSON post</td><td><code>LMS_CLIENT_SETUP</code></td></tr>
+        <tr><td>Phase-1 document gen</td><td>Internal admin action to kick off DSC</td><td><code>PHASE_ONE_DOCUMENTS_GENERATE_DSC_NOTIFICATION</code></td></tr>
+        <tr><td>Phase-2 document gen</td><td>Manual after Phase-1 confirmed</td><td><code>PHASE_TWO_DOCUMENTS_GENERATE_DSC_NOTIFICATION</code></td></tr>
+        <tr><td>CAM report (Credit Approval Memo)</td><td>Reporting team ticket</td><td><code>GENERATE_CAM_REPORT</code></td></tr>
+        <tr><td>Customer UCIN registration</td><td>Compliance team ticket</td><td><code>REGISTER_USER_FOR_UCIN</code></td></tr>
+        <tr><td>CKYC upload entry</td><td>CKYC ops creates record manually</td><td><code>CREATE_CKYC_UPLOAD_ENTRY</code></td></tr>
+        <tr><td>Risk categorization</td><td>Compliance batch run</td><td><code>RISK_CATEGORIZATION</code></td></tr>
+        <tr><td>User-level KYC sync</td><td>Internal ops UI</td><td><code>USER_LEVEL_KYC_UPDATION</code></td></tr>
+        <tr><td>Partner approval callback</td><td>Manual partner notification</td><td><code>PARTNER_APPLICATION_APPROVED_CALLBACK</code></td></tr>
+        <tr><td>Decline notification</td><td>Comms team email</td><td><code>DECLINE_NOTIFICATION</code></td></tr>
+        <tr><td>Address Proof Verification</td><td>Field investigation kicked off via ticket</td><td><code>TRIGGER_APV</code></td></tr>
+        <tr><td>CIBIL expiry rules</td><td>Compliance manually updated</td><td><code>DISABLE_CIBIL_EXPIRY</code></td></tr>
+        <tr><td>Loan-mandate association</td><td>Ops linked loan ID to NACH ID manually</td><td><code>LOAN_MANDATE_ASSOCIATION</code></td></tr>
+      </tbody>
+    </table>
+    <p>Each of these was minutes-to-hours of human handoff; many ran in serial because ops worked partner-by-partner in a queue.</p>
+
+    <div class="callout callout--good">
+      <div class="callout-title"><span class="dot"></span> What changed after</div>
+      <p>Each <code>EventConfig</code> registration replaced one manual step with a deterministic side-effect on a stage transition. <code>APPLICATION_APPROVED</code> now fires Phase-1 docs, UCIN registration, CKYC upload, risk categorization in <strong>parallel async</strong>. Phase-1 success → Phase-2. Phase-2 success → LMS setup. LMS completed → partner callback + KYC update. And so on, all the way to UTR. <strong>Ops only intervenes on declines and exceptions now</strong>, not on the happy path.</p>
+    </div>
+
+    <div class="callout callout--warn">
+      <div class="callout-title"><span class="dot"></span> What you don't claim</div>
+      <ul>
+        <li>This is <em>median</em>, not p99. p99 is dominated by partner SLAs (Digio NACH, vendor APIs) which we can't squeeze.</li>
+        <li>The 30% is the platform-wide blended figure. Per-partner numbers vary; some new partners launched with the trigger map already in place, so they have no "before" baseline — they're excluded from the 30% calc.</li>
+        <li>The trigger map is necessary, not sufficient. It's the <em>automation surface</em>; underlying integrations (Digio, Finflux, partner APIs) had to be reliable for the savings to materialize.</li>
+      </ul>
+    </div>
+
+    <h2 id="why-not-spring">Why NOT Spring State Machine</h2>
+    <p>If they ask about Spring State Machine specifically, walk through these four arguments in this order:</p>
+    <ol>
+      <li><strong>State-action coupling doesn't model partner-specific behaviour cleanly.</strong> Spring SM binds an action to a state transition. We needed a <em>list</em> of actions per transition, keyed by partner — same target state means different downstream events for BharatPe vs Meesho vs PayU. Modeling that in Spring SM either means N state machines (one per partner) or a single state machine with a meta-action that itself dispatches by partner — at which point I've reimplemented the trigger map inside Spring SM with extra ceremony.</li>
+      <li><strong>Audit fidelity required the <code>is_active</code> versioning + <code>prev_status</code> chain.</strong> Spring SM doesn't ship an audit primitive. We'd have built one anyway. Once you build it, the framework is mostly out of your way — cleaner to skip it.</li>
+      <li><strong>Re-entrancy on superseded callbacks.</strong> Vendor webhooks arrive late, out of order, or duplicate. The pragmatic state machine handles this through <code>markcurrentStatusInActiveIfAlreadyAvailable</code> and <code>disablePreviousDependentStatuses</code> — we <em>record</em> the late event for audit, but we don't act on it if it's been superseded. Spring SM's transition guards force you to choose: accept the transition (and corrupt downstream state) or reject it (and lose the audit trail).</li>
+      <li><strong>Adding a partner is a config change, not a state machine redesign.</strong> One new builder method + new channel codes in DB config + per-event service implementations as needed. The state space stays the same.</li>
+    </ol>
+
+    <h2 id="failure-modes">Production Scenarios / Failure Modes</h2>
+
+    <details class="qa">
+      <summary><span class="qa-id">S1</span>Late callback after superseded stage</summary>
+      <div class="qa-body">
+        <p>Vendor webhook arrives with <code>OKYC_DETAILS_MATCH_SUCCESS</code> for an application that already moved past KYC into <code>FINAL_ELIGIBILITY_APPROVED</code>.</p>
+        <p><strong>What happens:</strong> <code>markcurrentStatusInActiveIfAlreadyAvailable</code> deactivates any prior active row for the same status. <code>disablePreviousDependentStatuses</code> may deactivate a stale <code>OKYC_DETAILS_MATCH_FAILED</code>. New row inserted with <code>is_active=true</code>. Triggers fire, but the application is not knocked back into KYC sub-flow because the dependent-stage rules don't deactivate <code>FINAL_ELIGIBILITY_APPROVED</code> from an <code>OKYC_*</code> stage.</p>
+        <p><strong>Interview line:</strong> "Audit-permissive, downstream-strict. We record everything; we only act on transitions where the precondition validations pass."</p>
+      </div>
+    </details>
+
+    <details class="qa">
+      <summary><span class="qa-id">S2</span>Concurrent transitions for the same application</summary>
+      <div class="qa-body">
+        <p>A user-submitted action and a vendor webhook hit the same application at the same millisecond.</p>
+        <p>Both call <code>insertApplicationTracker</code> on different threads. The dependent-stage map is read-only after lazy init, no contention there. The DB writes (deactivate + insert) aren't transactionally bound across threads. Both succeed; we get two new active rows. Triggers may fire twice — but each <code>IEventService</code> is idempotent.</p>
+        <p><strong>Honest answer if pushed:</strong> "I'd add a row-level lock — <code>SELECT ... FOR UPDATE</code> on the application's tracker — for the read-modify-insert sequence. Currently relies on idempotent event services and the rarity of true concurrency for a single application."</p>
+      </div>
+    </details>
+
+    <details class="qa">
+      <summary><span class="qa-id">S3</span>Trigger event service crashes mid fan-out</summary>
+      <div class="qa-body">
+        <p>Sync event throwing → caught by <code>processTriggers</code> try/catch → logged → caller still returns success because the state row is saved. Async event failing → swallowed inside the <code>CompletableFuture</code> unless the event service logs/alerts.</p>
+        <p>Recovery via stage-driven retry: re-entering a previous stage refires its triggers. <code>LMS_CLIENT_SETUP_RETRY</code> is itself a stage that refires <code>LMS_CLIENT_SETUP</code>.</p>
+        <p><strong>Honest answer:</strong> "Best-effort fan-out. If I rebuilt today, I'd publish each event config dispatch as an outbox row written in the same transaction as the tracker insert. A separate worker drains it — atomic-with-tracker-insert + retryable. That's the next evolution."</p>
+      </div>
+    </details>
+
+    <details class="qa">
+      <summary><span class="qa-id">S4</span><code>EventServiceFactory.get(...)</code> returns null</summary>
+      <div class="qa-body">
+        <p>A new <code>EventType</code> was added to the enum, partner builder registered an <code>EventConfig</code> referencing it, but the <code>IEventService</code> impl was forgotten.</p>
+        <p>The next line throws NPE → caught by <code>processTriggers</code> try/catch → logged → state row is intact. Mitigation: a startup validation could iterate all registered <code>EventConfig</code> entries and assert each <code>eventType</code> has a matching <code>IEventService</code> bean. Reasonable test to add.</p>
+      </div>
+    </details>
+
+    <details class="qa">
+      <summary><span class="qa-id">S5</span>Channel-code config missing for a new partner</summary>
+      <div class="qa-body">
+        <p>We onboard a new partner, deploy code, but the <code>BHARATPE_CHANNEL_CODES_CONFIG_KEY</code> config row isn't populated yet. <code>getBharatPeEventConfigList</code> reads the channel codes config and gets blank → empty list returned. No event configs registered. Applications still progress through stages, get tracker rows recorded, but no automation fires. Manual ops handles the application until the config flips.</p>
+        <p>This is the safe default by design. Misconfiguration should not corrupt state — only delay automation.</p>
+      </div>
+    </details>
+
+    <details class="qa">
+      <summary><span class="qa-id">S6</span>Re-init race on the trigger map</summary>
+      <div class="qa-body">
+        <p>Two threads enter <code>initTriggerEventList</code> at exactly the same time on cold start. Both see <code>partnerStageEventConfigMap.isEmpty()</code> outside the synchronized block. One enters; the other waits. Inside, the first populates the map. The second re-checks <code>isEmpty()</code>, finds it false, exits.</p>
+        <p>This is the <strong>double-checked locking idiom</strong>. Correct here because the map is <code>final</code> (set once in constructor) → safe publication; the check inside the lock is re-evaluated; mutations only inside the lock.</p>
+        <p><strong>Interview gotcha to know:</strong> Pre-Java-5, double-checked locking was broken because of the JMM. Post-Java-5, with <code>final</code> references and <code>volatile</code> on the assignee where needed, it's the standard idiom.</p>
+      </div>
+    </details>
+
+    <h2 id="cross-q">Cross-Question Bank</h2>
+
+    <p class="qa-group-title"><span class="badge">A</span>Architecture probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q1</span>Walk me through one application's full flow.</summary>
+      <div class="qa-body">
+        <p>Lead → tracker <code>CREATED</code> → trigger fires nothing. Soft eligibility runs → <code>SOFT_ELIGIBILITY_APPROVED</code>. Offers → user accepts → <code>OFFERS_ACCEPTED</code>. CKYC pull → success matches. Selfie → match success. DigiLocker OKYC → upload + match → triggers <code>EXTRACT_AADHAR_KYC_DATA</code> async. Final eligibility approved. Partner approval webhook → triggers <code>MARK_APPLICATION_APPROVED_BHARATPE</code> sync. NACH mandate → <code>NACH_MANDATE_DETAILS_UPDATED</code>. Internal <code>APPLICATION_APPROVED</code> → triggers Phase-1 docs, UCIN, CKYC upload, risk categorization in parallel. Phase-1 success → Phase-2. Phase-2 success → <code>LMS_CLIENT_SETUP</code>. LMS completed → partner callback + KYC update. Loan request → <code>LOAN_MANDATE_ASSOCIATION</code>. UTR received → Phase-4 docs + policy certificate. Disbursed.</p>
+      </div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q2</span>Why a separate Maven module for <code>dgl-status</code>?</summary>
+      <div class="qa-body"><p>Single mutation chokepoint. Anything that changes application state imports this module and calls <code>insertApplicationTracker</code>. There is no second path. Trigger logic colocates with state changes — adding a side-effect for a stage transition is one builder edit + one event service bean, both inside <code>dgl-status</code>. No cross-module coordination.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q3</span>Why <code>EnumMap</code> for the stage map and not <code>HashMap</code>?</summary>
+      <div class="qa-body"><p>EnumMap is array-backed (indexed by ordinal), branch-free, no hashing, no allocation per lookup. Cache-friendly. For an enum with ~280 entries, <code>EnumMap.get</code> is essentially <code>array[stage.ordinal()]</code>. The lookup is on the hot path of every state transition.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q4</span>What's <code>nspType</code> for?</summary>
+      <div class="qa-body"><p>NSP = Non-Self-Proprietorship — the company-applicant flow. A company application has one company applicant + N individual co-applicants. Triggers differ for company-level vs individual-level events (e.g. <code>MARK_APPLICATION_APPROVED_NSP</code> only fires on company-level transitions). The <code>channelKey = channelCode + "_" + nspType</code> partitions the trigger registry along that axis.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q5</span>Why is <code>partnerStageEventConfigMap</code> keyed by <code>channelKey</code> (a string) rather than channel + nspType as separate keys?</summary>
+      <div class="qa-body"><p>Single-key lookup is the hot path. Two-level lookup is three hashing ops vs one string concat at registration time and one hash at lookup time. We pay the concat once at startup and one hash per dispatch. The key shape is also defensive — if both partners and NSPs grow, we don't have to refactor the map type.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q6</span>How does <code>dgl-status</code> interact with the rest of the platform?</summary>
+      <div class="qa-body"><p>Passive utility module. Higher-level modules (lending, kyc-service, dls-nach-service, journey-recovery-service) call into it. Exposes <code>IApplicationStatusService</code> and <code>ITriggerService</code> as Spring beans. Inside, it depends on <code>model</code> (enums), <code>rdbms</code> (repositories), and <code>dglServicesModel</code> (constants). Dependency graph is one-way.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">B</span>Code-level probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q7</span>Show me how a callback for an already-passed stage is handled.</summary>
+      <div class="qa-body"><p><code>markcurrentStatusInActiveIfAlreadyAvailable</code> runs as step 1 of <code>insertApplicationTracker</code>. It finds any active row with the same <code>current_status</code>, flips it to <code>is_active=false</code>. Then we insert the new row. The state row is preserved for audit; the active state is the latest one. Triggers fire based on the new transition; if the partner-specific event service is idempotent (most check existing partner status before re-calling), no duplicate side-effect is incurred.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q8</span>Walk me through <code>disablePreviousDependentStatuses</code>.</summary>
+      <div class="qa-body"><p>Looks up dependent stages for the current channel + status combo from the prebuilt <code>dependentStagesMap</code>. If non-empty, runs a single bulk UPDATE: <code>UPDATE A_APPLICATION_STAGE_TRACKER SET is_active=false, updated_at=NOW() WHERE application_id=? AND tenant_id=? AND current_status IN (?, ?, ...) AND is_active=true</code>. One round-trip, set-based.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q9</span>What does <code>validateApplicationDetails</code> enforce?</summary>
+      <div class="qa-body"><p>Two checks. First: if the <code>EventConfig</code> declares a <code>from</code> and the actual transition's <code>from</code> doesn't match AND the declared <code>from</code> isn't anywhere in the application's completed-stage history, fail. Second: if the <code>EventConfig</code> declares <code>required</code> stages, all of them must be in the completed-stage history. Both checks read from active tracker rows only.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q10</span>Why is <code>applicationDetails</code> built lazily inside <code>processEvents</code> instead of at the start?</summary>
+      <div class="qa-body"><p>Most stage transitions either have zero event configs or one. Building the DTO requires fetching the full tracker list. Lazy init means we don't pay that cost when the registry returned an empty list of configs. Once we know there's at least one config to evaluate, we build the DTO once and reuse across all configs in the list.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q11</span>Why does <code>processTriggers</code> swallow exceptions?</summary>
+      <div class="qa-body"><p>Trigger failure must not invalidate the recorded state. The audit row is already saved by step 4. Step 5 is best-effort. If a trigger fails, ops gets a log line; recovery is via cron sweepers. Throwing here would force the caller to handle two error semantics — "did the state save?" and "did all triggers fire?" — for no benefit.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q12</span>Why <code>CompletableFuture.runAsync</code> instead of <code>@Async</code>?</summary>
+      <div class="qa-body"><p>Explicit executor wiring. We pass a specific <code>taskExecutor</code> bean (<code>eventThreadPoolExecutor</code>) by qualifier. <code>@Async</code> couples the execution to a default executor or requires <code>@Async("name")</code> everywhere. <code>runAsync(..., taskExecutor)</code> makes the executor visible at the call site — easier to reason about thread isolation, queue size, rejection policy.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">C</span>State-machine-specific probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q13</span>Why an enum and not a database-driven state list?</summary>
+      <div class="qa-body"><p>Compile-time safety; exhaustive switch checking; PR-reviewable transitions; EnumMap perf. Adding a stage requires a deploy, which is a feature: stages are rare additions, <em>behaviour</em> changes are frequent and live in DB-driven config (channel code lists). Right separation: state space is code; behaviour is config.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q14</span>What if a stage transition isn't in the dependent-stage map?</summary>
+      <div class="qa-body"><p>Nothing happens — <code>validateIfDependentStateExists</code> short-circuits and <code>disablePreviousDependentStatuses</code> returns. The state row is still saved. Triggers may or may not fire depending on whether <code>partnerStageEventConfigMap</code> has entries for that channel + stage. The system is permissive on missing mappings.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q15</span>What if the same <code>EventType</code> is registered twice for the same channel + stage?</summary>
+      <div class="qa-body"><p>Both run. The list of <code>EventConfig</code> for that key has two entries. <code>validateApplicationDetails</code> is the only gate; if both pass, both execute. In practice we don't have duplicate registrations — the builders are static lists. A startup sanity check would catch duplicates.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q16</span>How do you test the state machine?</summary>
+      <div class="qa-body">
+        <p>Three layers:</p>
+        <ul>
+          <li><strong>Unit:</strong> <code>validateApplicationDetails</code> with synthetic <code>ApplicationDetailsDTO</code> covers from/required combinations.</li>
+          <li><strong>Integration:</strong> Spring boot test that calls <code>insertApplicationTracker</code> end-to-end and asserts (a) tracker rows exist with correct <code>is_active</code>, (b) the right <code>IEventService.process</code> got invoked (mocked).</li>
+          <li><strong>Property-based:</strong> for each partner channel, assert "any reachable stage is reachable from <code>CREATED</code> via a valid transition path" — catches missing entries in trigger or dependent maps.</li>
+        </ul>
+      </div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q17</span>How do you handle a "rewind" — a stage that should retract a previous transition?</summary>
+      <div class="qa-body"><p>Re-entry. Inserting the previous stage again triggers <code>markcurrentStatusInActiveIfAlreadyAvailable</code> to deactivate the most recent occurrence, then inserts a new active row. Anything downstream that should be invalidated is captured by <code>disablePreviousDependentStatuses</code>. The audit trail shows the back-and-forth. Intentionally heavy-handed — a true "undo" with idempotent reconciliation is a bigger ask.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">D</span>Trade-off probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q18</span>280+ states sounds like too many — would you refactor?</summary>
+      <div class="qa-body"><p>Not the enum — that's the state space. The refactor is UI-side: group stages into categories (KYC / Eligibility / Approval / Documents / NACH / Disbursal / Compliance) and surface a category in the admin UI without losing per-stage audit. We did this on the merchant-facing API: external responses show a coarse stage label; internal admin shows fine-grained.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q19</span>Why not Kafka events for every stage transition?</summary>
+      <div class="qa-body"><p>Internal triggers are direct method dispatch because Kafka adds latency and ops surface that doesn't pay off in-process. Cross-service notifications (partner notification fan-out, analytics) DO use Kafka — different path. Split: in-process triggers for state-machine cohesion; out-of-process Kafka for systems that don't share our state model.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q20</span>The trigger map is in-memory. What about cluster nodes seeing different configs?</summary>
+      <div class="qa-body"><p>The map is built at startup from DB config. All nodes read the same config and build the same map. If the config changes, we redeploy or send a refresh signal. Node-to-node skew during a rolling deploy is bounded — the map is identical for every node running the same build.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q21</span>Why not split each partner into its own service?</summary>
+      <div class="qa-body"><p>Cohesion — they all share the state machine, the audit table, the event factory, and ~80% of the events. Splitting would either duplicate that infra (ops nightmare) or carve out a shared "state core" service that everyone calls (network hop on every transition). The current design treats partners as plug-ins via builders + config.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">E</span>Scale probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q22</span>10x more applications — what breaks first?</summary>
+      <div class="qa-body"><p>DB writes on <code>A_APPLICATION_STAGE_TRACKER</code>. Each transition is one bulk UPDATE (deactivate dependents) + one INSERT. At 10x volume those become hot. Mitigation: partition tracker by <code>application_id</code> modulo, async-batch the dependent deactivations for non-critical transitions, aggressive indexing. Second: trigger fan-out — async events flood <code>eventThreadPoolExecutor</code>. Mitigation: bound it harder, or move to outbox-driven workers per event type.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q23</span>What about hotspotting on a single big partner?</summary>
+      <div class="qa-body"><p>Per-partner rate limiting at the API layer (we already have it). Trigger fan-out is per-application, so one big partner doesn't congest the executor — each application's events run within their own future. If we ran into per-partner outbound API rate limits, we'd queue per-partner via Kafka with partner-id partition keys.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q24</span>What's the cost of double-checked locking on init?</summary>
+      <div class="qa-body"><p>Constant cost per JVM lifetime — the synchronized block is hit twice on cold start (race window). After that, the outer <code>isEmpty()</code> returns false and we return without locking. On a hot-warm node it's effectively free.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q25</span>What's the size of the trigger map at runtime?</summary>
+      <div class="qa-body"><p>~15 partner channels × ~30 trigger stages × 1-3 events per stage = ~700-1500 <code>EventConfig</code> entries total. Each is a small POJO. Memory footprint is sub-MB. Lookup is <code>EnumMap.get</code> on a ~280-entry enum → ~10 ns.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">F</span>Failure-mode probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q26</span>Trigger crashes mid fan-out — what happens?</summary>
+      <div class="qa-body"><p>Sync trigger throwing → caught by <code>processTriggers</code> try/catch → logged → caller returns success because the state row is saved. Async trigger failing → swallowed inside the future unless the event service logs/alerts. Recovery via stage-driven retry: re-entering a previous stage refires its triggers. For events with no retry stage, ops paged via logs.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q27</span>What if the DB is down during <code>insertApplicationTracker</code>?</summary>
+      <div class="qa-body"><p>The whole method throws — <code>markcurrentStatusInActiveIfAlreadyAvailable</code> or <code>saveCurrentStatus</code> will fail on the connection. Caller sees <code>false</code>. The application stays in its previous active stage. Webhook callers (Digio, partners) retry per their own contract. We don't lose data because nothing was committed.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q28</span>What if a webhook arrives, our app records the stage, but the trigger for partner notification fails?</summary>
+      <div class="qa-body"><p>The state is recorded; the next webhook will not refire the partner notification (because the stage is already active). To recover: ops can manually re-enter the same stage or push a synthetic stage that refires the right trigger. We have admin tooling for both.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q29</span>Two partners share a channel code — how do you handle it?</summary>
+      <div class="qa-body"><p>We don't allow it by convention; <code>channel_code</code> is unique per business contract. If it happened by mistake, both builders would register events for the same key, and <code>processEvents</code> would dispatch both. Fixing requires renaming a channel — a one-off migration with a backfill of <code>application.channel_code</code> rows.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q30</span>A new <code>ApplicationStage</code> is added but no partner has triggers for it. What happens?</summary>
+      <div class="qa-body"><p>Apps progress through it normally. Tracker rows are saved. Trigger lookup returns empty → no events fire. Dependent-stage rules don't deactivate it. Effectively a passthrough state. We add it intentionally for audit visibility (e.g. analytics flags); if we need triggers later, they're a one-builder-edit away.</p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">G</span>Curveball probes</p>
+    <details class="qa">
+      <summary><span class="qa-id">Q31</span>Why does <code>getNspIndividualEventConfigList</code> exist if you also have per-partner SP builders?</summary>
+      <div class="qa-body"><p>NSP (Non-Self-Proprietorship) is a different application <em>shape</em> — one company + N individuals — so the trigger model has to fan out per individual. The NSP-specific builders register events that fire on individual-level transitions (<code>SELFIE_MATCH_SUCCESS</code> for an applicant) using the <code>nspType=INDIVIDUAL</code> discriminator in the channel key.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q32</span>What happens if a config DB read fails during init?</summary>
+      <div class="qa-body"><p>The builder catches the exception in <code>getConfig</code>, returns null, and treats it as "no channel codes configured" — empty list. The trigger map is built with whatever did succeed. This is fail-soft. Trade-off made for resilience during a rolling deploy where DB transient issues are expected.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q33</span>The init is lazy. What if the very first request to <code>process(...)</code> is the one that triggers init, and it's slow?</summary>
+      <div class="qa-body"><p>First request pays the init cost (~100 ms for ~1500 configs). Subsequent requests are fast. We accept first-request latency over a startup-blocking bean init. If we needed to remove first-request latency, we'd add an <code>@PostConstruct</code> that calls <code>initTriggerEventList(defaultTenantId)</code> — single line change.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q34</span>Why do some <code>EventType</code> have a partner-specific suffix (e.g. <code>MARK_APPLICATION_APPROVED_BHARATPE</code>) but others don't (<code>KYC_SUCCESS_CALLBACK</code>)?</summary>
+      <div class="qa-body"><p>When the event service's behaviour is partner-specific (different API call, different payload), we have one enum entry per partner — the routing happens at config-registration time, not inside the service. When the behaviour is partner-neutral (notify generic comms, dispatch standard SMS), one entry handles all partners. The suffix is a deliberate signal of where the partner-specific code lives.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q35</span>How do you migrate a partner from one channel code to another?</summary>
+      <div class="qa-body"><p>One-off migration: backfill <code>application.channel_code = new_code WHERE channel_code = old_code</code> and update the channel code in the partner builder + DB config. The trigger map rebuilds on next startup. Existing applications under the old channel keep progressing; new ones use the new channel.</p></div>
+    </details>
+    <details class="qa">
+      <summary><span class="qa-id">Q36</span>What's the worst pathology you've seen in production?</summary>
+      <div class="qa-body"><p>A vendor sent the same webhook 4× in 30 seconds during a network partition recovery. Without idempotency, that would have created 4 LMS clients, 4 partner approval callbacks, 4 NACH mandates. The state machine's <code>markcurrentStatusInActiveIfAlreadyAvailable</code> + idempotent event services caught all four — only one set of side-effects took effect. The audit table shows 4 rows for the stage (3 inactive, 1 active) which is correct. <strong>That's the design earning its keep.</strong></p></div>
+    </details>
+
+    <p class="qa-group-title"><span class="badge">H</span>Honest pivots — "What would you do differently today?"</p>
+    <ul>
+      <li><strong>Outbox pattern for trigger fan-out.</strong> Each <code>EventConfig</code> dispatch becomes a row in an outbox table written in the same transaction as the tracker insert. A separate worker drains the outbox per event type with retry semantics. Atomic-with-tracker-insert solves the "trigger failed silently" class of bugs.</li>
+      <li><strong>Pessimistic row lock on application_id during transition.</strong> <code>SELECT ... FOR UPDATE</code> in <code>getPrevStatus</code> to serialize concurrent transitions for the same application.</li>
+      <li><strong>DB-driven trigger config for non-stage-shape changes.</strong> Adding a new event for an existing partner-stage combo is currently a code change. Could be a DB row + hot reload, <em>if</em> the event type mapping is also DB-driven.</li>
+      <li><strong>Stage-transition validator at startup.</strong> A test that walks the trigger map + dependent map + enum and asserts: every <code>EventType</code> referenced has an <code>IEventService</code> bean; no orphan stages; no unreachable terminal stages.</li>
+      <li><strong>Distributed tracing per transition.</strong> A trace span around <code>insertApplicationTracker</code> with sub-spans for each step + each trigger would make production debugging immediate.</li>
+    </ul>
+
+    <h2 id="cheat-sheet">One-Pager Cheat Sheet</h2>
+    <p>Memorize the morning of:</p>
+    <table>
+      <thead><tr><th>Area</th><th>Answer</th></tr></thead>
+      <tbody>
+        <tr><td><strong>What is it</strong></td><td>Pragmatic state machine: enum + tracker table + trigger service. Not Spring State Machine.</td></tr>
+        <tr><td><strong>Three primitives</strong></td><td><code>ApplicationStage</code> (state), <code>A_APPLICATION_STAGE_TRACKER</code> (audit), <code>TriggerServiceImpl</code> (side-effects).</td></tr>
+        <tr><td><strong>Mutation chokepoint</strong></td><td><code>ApplicationStatusServiceImpl.insertApplicationTracker(applicationId, tenantId, stage, type, typeId)</code>.</td></tr>
+        <tr><td><strong>6 steps in <code>insertApplicationTracker</code></strong></td><td>mark same-status inactive → get prev status → disable dependent statuses → save current → process triggers → admin UI sync + partner notify.</td></tr>
+        <tr><td><strong>Dependent stages</strong></td><td><code>Map&lt;channelCode, Map&lt;stage, List&lt;dependentStage&gt;&gt;&gt;</code> — bulk deactivates conflicts on insert. Examples: APPROVED deactivates DECLINED, SUCCESS deactivates FAILED.</td></tr>
+        <tr><td><strong>Trigger registry</strong></td><td><code>partnerStageEventConfigMap = Map&lt;channelKey, Map&lt;stage, List&lt;EventConfig&gt;&gt;&gt;</code>. ChannelKey = <code>channelCode + "_" + nspType</code> (or just channelCode).</td></tr>
+        <tr><td><strong><code>EventConfig</code></strong></td><td>from, to, isAsync, required, eventType, channelCode, nspType.</td></tr>
+        <tr><td><strong>Validation</strong></td><td><code>validateApplicationDetails</code> checks <code>from</code> matches and all <code>required</code> stages are in completed history.</td></tr>
+        <tr><td><strong>Async vs sync</strong></td><td>sync = ledger-affecting / next-stage-blocking. async = notifications, doc gen, analytics, KYC sync.</td></tr>
+        <tr><td><strong>Factory</strong></td><td><code>EventServiceFactory</code> injects <code>List&lt;IEventService&gt;</code>, registers by <code>getEventType()</code> into <code>EnumMap&lt;EventType, IEventService&gt;</code>.</td></tr>
+        <tr><td><strong>30% reduction</strong></td><td>Replaced manual ops handoffs (LMS setup, doc phases, partner callback, CAM, UCIN, CKYC upload, snail mail, APV, risk categorization) with deterministic side-effects on stage transitions.</td></tr>
+        <tr><td><strong>Defended by</strong></td><td>Median minutes from <code>CREATED</code> to <code>UTR_RECIEVED</code> per channel, before vs after, 1000+ apps per partner sample. Source: tracker timestamps.</td></tr>
+        <tr><td><strong>Why not Spring SM</strong></td><td>State-action coupling doesn't model partner-specific behaviour; audit + re-entrancy were custom anyway; adding a partner is config not redesign.</td></tr>
+        <tr><td><strong>Concurrency</strong></td><td>Idempotent event services; double-checked locking on map inits; <code>SELECT ... FOR UPDATE</code> is the next evolution.</td></tr>
+        <tr><td><strong>Failure mode</strong></td><td>Trigger failures don't roll back state — audit-permissive, downstream-strict. Recovery via stage-driven retries (e.g. <code>LMS_CLIENT_SETUP_RETRY</code>).</td></tr>
+        <tr><td><strong>Adding a partner</strong></td><td>One builder method (<code>get{Partner}EventConfigList</code>) + channel codes in DB config + new event service beans as needed. No core changes.</td></tr>
+        <tr><td><strong>Adding an event type</strong></td><td>Enum entry + <code>IEventService</code> impl + register in builder(s). Spring DI does the rest.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="how-to-use">How To Use This File In The Interview</h2>
+    <ol>
+      <li>If "tell me about your state machine" — open with the <strong>60-second pitch</strong>. Then say "I deliberately didn't use Spring State Machine because…" and walk through the four arguments.</li>
+      <li>If "what's the table look like" — describe the <code>is_active</code> flag pattern and why it beats "keep the latest."</li>
+      <li>If "walk me through one application" — use the BharatPe sequence diagram.</li>
+      <li>If "how did you get the 30%" — describe the manual handoff list, then the measurement methodology.</li>
+      <li>If they probe code — pick the section they're poking at; cite the line range.</li>
+      <li>If they ask "what would you do differently" — lead with the outbox pattern; it's the most respected engineering answer.</li>
+      <li><strong>Anti-pattern:</strong> don't volunteer the 280+ enum count unless asked. Lead with "60+, the practically-trafficked set per channel."</li>
+    </ol>
+
+    <footer class="foot">
+      <p>Anchored to <code>zipcredit-backend/dgl_base/dgl-status</code> — verify line numbers against the source if the file evolves. Companion: <code>05-state-machine-merchant-onboarding-deep-dive.md</code>.</p>
+    </footer>
+
+  </main>
+</div>
+
+<!-- Prism core + languages + plugins -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+
+<!-- Mermaid -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+
+<script>
+(function () {
+  // ============================================================
+  // Theme toggle
+  // ============================================================
+  const root = document.documentElement;
+  const themeKey = "sm-deep-dive-theme";
+  const stored = localStorage.getItem(themeKey);
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const initial = stored || (prefersDark ? "dark" : "light");
+  root.setAttribute("data-theme", initial);
+
+  const toggle = document.getElementById("themeToggle");
+  toggle.addEventListener("click", () => {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    localStorage.setItem(themeKey, next);
+    initMermaid(next);
+  });
+
+  // ============================================================
+  // Mermaid init (re-init on theme change)
+  // ============================================================
+  function initMermaid(theme) {
+    if (!window.mermaid) return;
+    const cfg = {
+      startOnLoad: false,
+      theme: theme === "dark" ? "dark" : "default",
+      securityLevel: "loose",
+      flowchart: { curve: "basis", htmlLabels: true },
+      sequence: { showSequenceNumbers: false, mirrorActors: false, actorMargin: 60 },
+      themeVariables: theme === "dark"
+        ? {
+            primaryColor: "#1f2a44",
+            primaryTextColor: "#e6edf6",
+            primaryBorderColor: "#60a5fa",
+            lineColor: "#60a5fa",
+            secondaryColor: "#1a2138",
+            tertiaryColor: "#0d1224",
+            background: "#111729",
+            mainBkg: "#1a2138",
+            altBackground: "#111729",
+            actorBkg: "#1f2a44",
+            actorBorder: "#60a5fa",
+            actorTextColor: "#e6edf6",
+            noteBkgColor: "#3b2710",
+            noteTextColor: "#e6edf6",
+            noteBorderColor: "#b45309"
+          }
+        : {
+            primaryColor: "#dbeafe",
+            primaryTextColor: "#0f172a",
+            primaryBorderColor: "#2563eb",
+            lineColor: "#2563eb",
+            secondaryColor: "#ede9fe",
+            tertiaryColor: "#fef3c7",
+            background: "#ffffff"
+          }
+    };
+    window.mermaid.initialize(cfg);
+
+    // Reset already-rendered diagrams
+    document.querySelectorAll(".mermaid").forEach((node) => {
+      const original = node.getAttribute("data-original-source") || node.textContent;
+      if (!node.getAttribute("data-original-source")) {
+        node.setAttribute("data-original-source", original);
+      }
+      node.removeAttribute("data-processed");
+      node.innerHTML = original;
+    });
+    window.mermaid.run({ querySelector: ".mermaid" });
+  }
+  initMermaid(initial);
+
+  // ============================================================
+  // Auto-build TOC from h2 + h3
+  // ============================================================
+  const tocList = document.getElementById("toc");
+  const headings = document.querySelectorAll("main h2, main h3");
+  headings.forEach((h) => {
+    if (!h.id) {
+      h.id = h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    }
+    const li = document.createElement("li");
+    li.className = h.tagName === "H2" ? "lvl-2" : "lvl-3";
+    const a = document.createElement("a");
+    a.href = "#" + h.id;
+    a.textContent = h.textContent.replace(/\s+/g, " ").trim();
+    li.appendChild(a);
+    tocList.appendChild(li);
+  });
+
+  // Scroll-spy
+  const links = Array.from(tocList.querySelectorAll("a"));
+  const linkById = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const id = entry.target.id;
+      const link = linkById.get(id);
+      if (!link) return;
+      if (entry.isIntersecting) {
+        links.forEach((a) => a.classList.remove("active"));
+        link.classList.add("active");
+      }
+    });
+  }, { rootMargin: "-30% 0px -65% 0px", threshold: [0, 1] });
+  headings.forEach((h) => observer.observe(h));
+
+  // ============================================================
+  // Copy to clipboard on every code-card
+  // ============================================================
+  document.querySelectorAll(".code-card").forEach((card) => {
+    const btn = card.querySelector(".copy-btn");
+    const pre = card.querySelector("pre");
+    if (!btn || !pre) return;
+    btn.addEventListener("click", async () => {
+      const text = pre.innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        const original = btn.textContent;
+        btn.textContent = "Copied";
+        btn.classList.add("ok");
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.classList.remove("ok");
+        }, 1400);
+      } catch (e) {
+        btn.textContent = "Press Cmd/Ctrl+C";
+        setTimeout(() => (btn.textContent = "Copy"), 1400);
+      }
+    });
+  });
+
+  // ============================================================
+  // Expand-all + Print
+  // ============================================================
+  const expandAllBtn = document.getElementById("expandAll");
+  let allOpen = false;
+  expandAllBtn.addEventListener("click", () => {
+    allOpen = !allOpen;
+    document.querySelectorAll("details.qa").forEach((d) => (d.open = allOpen));
+    expandAllBtn.textContent = allOpen ? "Collapse all Q&A" : "Expand all Q&A";
+  });
+  document.getElementById("printBtn").addEventListener("click", () => {
+    document.querySelectorAll("details.qa").forEach((d) => (d.open = true));
+    setTimeout(() => window.print(), 50);
+  });
+
+  // ============================================================
+  // Re-highlight Prism after DOM is ready (line-numbers plugin)
+  // ============================================================
+  if (window.Prism) {
+    window.Prism.highlightAll();
+  }
+})();
+</script>
+
+</body>
+</html>
