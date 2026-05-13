@@ -1,200 +1,1256 @@
-# File 19: Payment Gateway System Design — B2B + B2C at 10M+/day
+# File 19: Payment Gateway System Design — Generic Industry Reference
 
-> Goal: walk into any payment-gateway system-design round (Airtel, PayU peer, Razorpay-tier) and own it end-to-end — HLD, LLD, middleware picks with justification, scale math, security, and cross-questions.
+> Vendor-neutral, MNC-grade payment gateway design as it would be presented in a senior system-design interview at Stripe, Adyen, PayPal, Razorpay, or any large fintech.
 >
-> Anchored to your real PayU lending-stack code: `dgl-status` state machine + `TriggerServiceImpl` (file 05), `ApplicationStage` enum, `A_APPLICATION_STAGE_TRACKER`, Redisson `RLock` (STAR 2), `AutoDisbursalFactory` (file 18), AOP read-write split (STAR 7), GPay 3-layer security (STAR 3) + SFTP recon (STAR 6), `ANachLogsEntity` unique-constraint dedup. Cross-refs files 14, 17, 18, and v2 behavioral pack (file 16).
+> No project-specific anchors. No internal class names. Pure "this is how the industry builds it" reference.
 
 ---
 
-## SECTION 0 — THE 30-SECOND ANSWER
+## SECTION 0 — THE 30-SECOND PITCH
 
-> *"Edge for TLS + auth; a stateless txn orchestrator behind an idempotency layer; a routing layer that picks the right PSP via a Factory; per-mode handler services (UPI, Cards, Netbanking, Wallets, B2B transfer); Kafka as the event spine; MySQL master + replicas for queryable state; Redis for hot reads + idempotency + rate limits; ElasticSearch for txn search; webhook delivery via the always-200 pattern; saga for refunds; HSM + tokenization for PCI; partner-failover routing for resilience."*
+> *A payment gateway is a regulated, high-availability, money-moving system that accepts a payment instruction from a merchant, routes it to the correct payment rail (card network, UPI, bank), captures the customer's authorization, settles funds to the merchant, and produces an immutable, reconciled, auditable record of every cent moved.*
 
-That's the 30-second answer. The next 30 minutes is filling in the *why*.
+The reference architecture in 9 layers:
+
+1. **Edge** — TLS termination, DDoS, WAF, CDN.
+2. **API gateway** — routing, throttling, versioning, observability.
+3. **Authentication + authorization** — API key, HMAC, mTLS, OAuth, JWT.
+4. **Idempotency layer** — caller-supplied key, server-side dedup.
+5. **Transaction orchestrator** — state machine, saga, double-entry ledger.
+6. **Smart router + PSP/acquirer connectors** — per-rail handlers.
+7. **Risk + fraud engine** — synchronous rules + async ML scoring.
+8. **Vault + HSM + tokenization** — PCI-DSS scope reduction.
+9. **Event spine + downstream services** — Kafka into webhooks, settlement, reconciliation, analytics, reporting.
+
+Every senior interviewer expects you to be able to draw these 9 layers and reason about the choices at each one.
 
 ---
 
-## SECTION 1 — REQUIREMENTS & CAPACITY MODEL
+## SECTION 1 — REQUIREMENTS
 
 ### 1.1 Functional requirements
 
-**B2C (collect):**
-- UPI (collect intent, push, QR, AutoPay mandate)
-- Cards (debit + credit, 3DS 2.0, tokenized PAN)
-- Netbanking (redirect flow with ~50 banks)
-- Wallets (Paytm, MobiKwik, Amazon Pay, FreeCharge)
-- EMI (bank EMI, no-cost EMI, cardless EMI via NBFC)
+**Acceptance (collect / pay-in):**
+- Cards — debit, credit, prepaid; domestic + cross-border; 3DS 2.0 challenge or frictionless.
+- UPI — collect, push, QR (static/dynamic), AutoPay mandate (recurring).
+- Net banking — bank redirect flow for ~50 banks (India) or equivalent locally.
+- Wallets — Paytm, Apple Pay, Google Pay, PayPal balance, etc.
+- EMI / BNPL — bank EMI, no-cost EMI, cardless EMI, Pay-Later partners.
+- Bank transfer — direct debit, ACH (US), SEPA (EU), NEFT (India).
 
-**B2B (payout):**
-- NEFT (batched, ~30 min cycle, no upper limit, no lower limit since 2024)
-- RTGS (real-time, ≥ ₹2L)
-- IMPS (real-time, 24×7, ≤ ₹5L)
-- UPI payout (≤ ₹1L per txn, lower for some channels)
-- Beneficiary verification (Penny Drop)
+**Payouts (pay-out / disbursal):**
+- Card payouts, UPI payouts, bank transfers (NEFT / RTGS / IMPS / ACH / SEPA / SWIFT).
+- Beneficiary verification (penny-drop).
+- Bulk payouts (batch upload).
 
 **Lifecycle:**
-- Refund (full + partial)
-- Dispute / chargeback
-- Settlement (T+1 default, T+0 express)
-- Reconciliation (daily file from each PSP / rail)
-- Reporting (merchant dashboard, internal BI)
+- Authorization + capture (separate or combined).
+- Void (pre-capture cancel).
+- Refund (full + partial, single + multi).
+- Dispute / chargeback management.
+- Settlement (T+0 / T+1 / configurable).
+- Reconciliation (per PSP, per rail, per bank).
+
+**Merchant-facing:**
+- Merchant onboarding (KYC, KYB, risk underwriting).
+- Dashboard (txns, settlements, refunds, disputes, reports).
+- API + SDKs (server SDK in Java/Python/Node/Go/PHP; client SDK for web + iOS + Android).
+- Hosted checkout (PSP-hosted page so merchant stays out of PCI scope).
+- Webhooks.
 
 ### 1.2 Non-functional requirements
 
 | Concern | Target |
 |---|---|
-| Throughput | 10M req/day ≈ **115 RPS average**, peak **~2000 RPS** (5-10x at IST shopping hours + EOD recon) |
-| Latency p99 (auth path) | **< 500 ms** end-to-end, including PSP call |
-| Latency p99 (webhook delivery) | **< 5 min** |
-| Availability | **99.95%** for core auth path (≈ 4h 22min downtime / year) |
-| Money correctness | **zero loss tolerance** — every paise reconciled |
-| Compliance | PCI-DSS Level 1, RBI tokenization mandate, 2FA where applicable |
-| Data retention | 7 years (RBI), audit-immutable |
+| Throughput (steady state) | 5,000 - 20,000 RPS (Stripe-tier; lower for regional) |
+| Throughput (peak / sale events) | 10x steady state, design for 100K+ RPS |
+| Latency p99 (auth path) | < 500 ms end-to-end including PSP call |
+| Latency p99 (refund / async paths) | < 5 sec |
+| Availability | 99.99% (52 min/year) for accept path; 99.95% for non-critical paths |
+| Money correctness | Zero loss. Every paise/cent must be accounted for. |
+| Compliance | PCI-DSS Level 1; regional (RBI, PSD2, FFIEC, GDPR, SOC 2 Type II) |
+| Data retention | 7 years for txn data; 90 days for raw logs; longer for compliance subsets |
+| RPO / RTO | RPO ≤ 1 min; RTO ≤ 5 min for accept path |
 
-### 1.3 The "10M/day" capacity math (do this out loud)
+### 1.3 Capacity math (do this out loud in the interview)
+
+Assume target: **20,000 RPS peak, 5,000 RPS steady, 500M txns/day**.
 
 ```
-10,000,000 req/day
-÷ 86,400 sec/day
-≈ 115 RPS average
+500M txns/day ÷ 86,400 s = ~5,800 TPS steady
+Peak factor 4x = ~23,000 TPS peak
 
-Peak factor 10x (Black Friday, festival sales, salary days)
-≈ 1,150 RPS peak
+DB write amplification per txn:
+  1 txn row + 1 state-machine row + 1 ledger entry (debit) + 1 ledger entry (credit)
+  + 1 idempotency row + 1 outbox row = 6 writes
+  ≈ 30K writes/sec at steady, 140K writes/sec at peak
 
-EOD recon burst: 50 partners × ~10K txns each = 500K compute calls/hour
-≈ ~140 additional RPS for ~2 hours
+Storage growth:
+  500M rows/day × ~2KB avg = 1 TB/day raw
+  With indexes + audit + ledger ≈ 3-5 TB/day
+  Retain hot 30 days, warm 11 months, cold 6 years (S3/Glacier)
 ```
 
-**Conclusion:** **~2000 RPS peak** is the design target. Not Stripe-scale (50K+ RPS); modest but realistic mid-sized India fintech scale. **Honesty point:** don't claim Stripe-scale numbers in interviews unless you've actually run them — the gotcha questions on "how did you handle Kafka rebalance at 50K RPS" will catch you.
+**Conclusion:** at this scale you need horizontal sharding, multi-region active-active, and aggressive partitioning. At 1/10th of this (50M txns/day), a well-tuned single primary + replicas suffices.
 
-### 1.4 Out of scope (call this out explicitly)
+### 1.4 Out of scope (call this out in the interview)
 
-- KYC onboarding (separate domain)
-- Merchant signup / underwriting
-- BNPL underwriting
-- Loan origination (different system — `dgl-services`)
-- Card-network internals (Visa/MC authorization flow — we hit them via the PSP)
+- Card-network internals (Visa/Mastercard authorization).
+- Bank core-banking systems (we integrate via APIs).
+- KYC document AI processing (separate vertical).
+- Merchant-side checkout UX (we provide SDKs; merchant builds UI).
 
 ---
 
-## SECTION 2 — HIGH-LEVEL DESIGN (HLD)
+## SECTION 2 — HIGH-LEVEL DESIGN
 
-### 2.1 The diagram
+### 2.1 The reference diagram
 
 ```mermaid
-flowchart LR
-    Client[Merchant / Customer App] -->|TLS 1.3 + mTLS| Edge[Edge / WAF / LB]
-    Edge --> Gateway[API Gateway Kong]
-    Gateway --> Auth[Auth: API key + HMAC + JWT + mTLS]
-    Auth --> RateLimit[Rate Limit Redis]
-    RateLimit --> Idem[Idempotency Layer Redis]
-    Idem --> Orchestrator[Txn Orchestrator]
-    Orchestrator --> StateMachine[Txn State Machine dgl-status pattern]
-    StateMachine --> MySQL[(MySQL Master + Replicas)]
-    StateMachine --> Router[PSP Router Factory]
-    Router --> UPI[UPI Handler]
-    Router --> Cards[Cards Handler]
-    Router --> NB[Netbanking Handler]
-    Router --> Wallet[Wallet Handler]
-    Router --> B2B[B2B NEFT/RTGS/IMPS]
-    UPI -.->|PSP API| NPCI[(NPCI / PSP)]
-    Cards -.->|PSP API| CardNet[(Card Network / PSP)]
-    NB -.->|Redirect| Bank[(Bank)]
-    Wallet -.->|Redirect / Token| WalletProv[(Wallet Provider)]
-    B2B -.->|Bank API| BankRail[(NEFT / RTGS / IMPS Rails)]
-    StateMachine --> Kafka[(Kafka Event Spine)]
-    Kafka --> Webhook[Webhook Delivery Service]
-    Kafka --> Settle[Settlement Service]
-    Kafka --> Recon[Reconciliation Service]
-    Kafka --> ES[(Elasticsearch Txn Search)]
-    Kafka --> Analytics[(ClickHouse Analytics)]
-    Settle --> S3[(S3 Recon Files Archive)]
+flowchart TB
+    subgraph "Client Layer"
+        Web[Merchant Web Checkout]
+        Mobile[Mobile SDK iOS/Android]
+        Server[Merchant Server S2S]
+    end
+
+    subgraph "Edge"
+        CDN[CDN CloudFront/Fastly]
+        WAF[WAF + DDoS Shield]
+        LB[Load Balancer]
+    end
+
+    subgraph "Gateway + Auth"
+        GW[API Gateway Kong/Envoy]
+        Auth[Auth Service]
+        RL[Rate Limiter Redis]
+        Idem[Idempotency Service]
+    end
+
+    subgraph "Core Payment Plane"
+        Orch[Txn Orchestrator]
+        SM[State Machine]
+        Risk[Risk + Fraud Engine]
+        Router[Smart Router]
+        Vault[Vault + HSM Tokenization]
+        Ledger[Double-Entry Ledger]
+    end
+
+    subgraph "PSP / Acquirer Connectors"
+        Card[Cards Connector]
+        UPI[UPI Connector]
+        NB[Net Banking Connector]
+        Wallet[Wallet Connector]
+        Bank[Bank Rails Connector]
+    end
+
+    subgraph "Event + Async"
+        Kafka[(Kafka Event Spine)]
+        WH[Webhook Delivery]
+        Settle[Settlement Engine]
+        Recon[Reconciliation Engine]
+        Refund[Refund + Dispute]
+    end
+
+    subgraph "Data Plane"
+        Pg[(PostgreSQL Master + Replicas)]
+        Redis[(Redis Cluster)]
+        ES[(Elasticsearch)]
+        CH[(ClickHouse/Snowflake)]
+        S3[(Object Store S3)]
+    end
+
+    subgraph "Observability + Control"
+        Obs[OTel + Prom + Grafana]
+        Audit[Audit Log Immutable]
+        Cfg[Config Service]
+    end
+
+    Web --> CDN
+    Mobile --> CDN
+    Server --> LB
+    CDN --> WAF --> LB --> GW
+    GW --> Auth --> RL --> Idem --> Orch
+    Orch --> SM --> Pg
+    Orch --> Risk
+    Orch --> Router
+    Router --> Card
+    Router --> UPI
+    Router --> NB
+    Router --> Wallet
+    Router --> Bank
+    Card -.->|API| Acq1[Visa/MC PSP]
+    UPI -.->|API| NPCI[NPCI / PSP]
+    NB -.->|Redirect| BankSite[Bank]
+    Wallet -.->|API| WProv[Wallet Provider]
+    Bank -.->|API| BRail[NEFT/RTGS/ACH]
+    Card -.-> Vault
+    Orch --> Ledger --> Pg
+    SM --> Kafka
+    Kafka --> WH
+    Kafka --> Settle
+    Kafka --> Recon
+    Kafka --> Refund
+    Kafka --> ES
+    Kafka --> CH
+    Settle --> S3
     Recon --> S3
-    UPI -.-> Vault[HSM / Vault / KMS]
-    Cards -.-> Vault
-    Webhook -.->|HTTPS + HMAC| MerchantWH[Merchant Webhook URL]
+    Orch -.-> Redis
+    Idem -.-> Redis
 ```
 
-### 2.2 The flow in 8 steps (memorize)
+### 2.2 The happy-path flow (memorize)
 
-1. **Client → Edge** — TLS termination + DDoS protection.
-2. **Edge → Gateway → Auth** — API key + HMAC verification.
-3. **Auth → Rate limit** — Redis token-bucket per merchant.
-4. **Rate limit → Idempotency** — first hit runs; subsequent identical hits return cached response.
-5. **Idempotency → Orchestrator** — creates txn row, fires `CREATED` state, returns txn_id sync.
-6. **Orchestrator → Router → PSP handler** — picks PSP, invokes its API, waits for `AUTHORIZED` or `FAILED`.
-7. **State machine → Kafka** — every state transition fires an event; downstream consumers project to ES, settlement, webhooks, recon.
-8. **Webhook delivery service → Merchant** — async; retries with exponential backoff; signed via HMAC.
+1. **Client → Edge.** TLS 1.3 terminates at the LB; DDoS rules filter junk traffic.
+2. **Edge → API gateway.** Routes by URL (`/v1/payments`), enforces basic rate limit.
+3. **Gateway → Auth service.** Validates API key + HMAC signature; resolves merchant context.
+4. **Auth → Rate limiter.** Token-bucket per merchant in Redis (Lua-scripted atomic).
+5. **Rate limiter → Idempotency layer.** Checks `Idempotency-Key`; returns cached response if seen.
+6. **Idempotency → Orchestrator.** Creates txn record; persists `CREATED` state; commits with outbox event.
+7. **Orchestrator → Risk engine.** Synchronous rules + ML score; block / challenge / allow.
+8. **Orchestrator → Smart router.** Picks PSP based on mode + cost + success-rate + health.
+9. **Router → PSP connector → PSP API.** Tokenized payload; mTLS; circuit-breaker wrapped.
+10. **PSP response → State machine.** Transitions `CREATED → AUTHORIZED` (or `FAILED`).
+11. **State machine → Ledger.** Double-entry posting: debit suspense, credit merchant payable.
+12. **State machine → Outbox → Kafka.** Event published; downstream consumers light up.
+13. **Webhook delivery → Merchant.** HMAC-signed; retry with exponential backoff.
+14. **Customer sync response.** Client receives `authorized` or `failed` in ~500ms p99.
 
-### 2.3 What this design borrows from the lending stack
+Async paths that fire from the same Kafka event:
+- Settlement engine accumulates `CAPTURED` txns for daily payout.
+- Reconciliation engine matches PSP-side daily files vs internal ledger.
+- Analytics pipeline streams via CDC to ClickHouse/Snowflake.
+- Search index (Elasticsearch) updated for dashboard txn search.
 
-| Pattern | From | Used here for |
-|---|---|---|
-| Stateless orchestrator + state machine + audit table | `dgl-status` / `ApplicationStatusServiceImpl.insertApplicationTracker` | Single mutation chokepoint for txn state |
-| `ApplicationStage` enum | `dgl-status` | Txn lifecycle stages |
-| Partner-keyed event dispatch (Factory + Map) | `TriggerServiceImpl.partnerStageEventConfigMap` | PSP routing + per-PSP events |
-| Idempotency via DB unique constraint | `ANachLogsEntity` `event_id` unique | Webhook + idempotency-key dedup |
-| Distributed lock for per-key serialization | Redisson `RLock` keyed by `digio:upinach:callback:{mandateId}` (STAR 2) | Per-txn lock during high-contention paths |
-| Read-write split via AOP | `@DataSource(SLAVE_DB)` (STAR 7) | Dashboard reads, recon scans |
-| 3-layer security stack | GPay JWT + PGP + TLS 1.3 mTLS (STAR 3) | High-value partner integrations |
-| Bouncy Castle hardening | Static-block register + verify + re-register (STAR 6) | All crypto code paths |
+### 2.3 Why this layering matters
+
+Each horizontal layer has **one job** and **one failure domain**:
+- Edge fails → degraded availability but no money loss.
+- Auth fails → all traffic stops cleanly; no half-auth txns.
+- Idempotency fails → safe to fall back to DB unique constraint.
+- Orchestrator fails → state machine is recoverable from durable log.
+- Connector fails → smart router fails over to next PSP.
+- Async services fail → Kafka replay covers the gap.
+
+**Compositional resilience.** A senior interviewer is listening for this framing.
 
 ---
 
 ## SECTION 3 — COMPONENT-BY-COMPONENT DEEP DIVE
 
-### 3.1 Edge / WAF / Load Balancer
+Each component is presented as: **What it is → Why it exists → How it's built → What it would look like at a big MNC.**
 
-**Responsibilities:** TLS 1.3 termination, mTLS for B2B clients, DDoS protection, geo routing, IP allowlisting per merchant, basic bot blocking.
+### 3.1 Edge (CDN + WAF + DDoS + Load Balancer)
 
-**Tech picks:**
-- **AWS ALB / NLB** for L4/L7 termination; **CloudFront** for global edge.
-- **AWS Shield Advanced** + **Cloudflare** for DDoS mitigation.
-- **AWS WAF** managed rule sets (SQL injection, XSS, common bot patterns).
+**What:** the first hop from public internet into our perimeter.
 
-**LLD details:**
-- Two AZs minimum, three for production. Health check every 5s on `/healthz` (returns 200 if DB + Redis + Kafka reachable).
-- Sticky sessions: **no** (stateless services).
-- Connection draining: 30s grace before instance removal.
+**Why:** absorbs volumetric attacks, terminates TLS, routes geo-locally, caches static assets, blocks known bad actors before they touch our compute.
 
-**Why TLS 1.3:** required for forward secrecy, smaller handshake (1-RTT, 0-RTT for resumption), removes weak ciphers. **Don't terminate below the gateway** — internal traffic should re-encrypt or use service mesh mTLS.
+**How:**
+- **CDN** — CloudFront, Fastly, or Akamai. Caches checkout-page static assets (CSS, JS, fonts) at the edge.
+- **WAF** — AWS WAF, Cloudflare, Imperva. Rule sets for OWASP Top 10 (SQLi, XSS), bot mitigation, rate-based rules.
+- **DDoS** — AWS Shield Advanced, Cloudflare Magic Transit, Akamai Prolexic. Always-on volumetric defense at L3-L4.
+- **Load balancer** — AWS ALB / GCP HTTPS LB / Envoy. L7 routing, mTLS termination for B2B, health checks every 5s.
 
-### 3.2 API Gateway
+**MNC reality:**
+- Two geo-regions minimum (active-active or active-passive).
+- TLS 1.3 only; ciphers hardened.
+- mTLS available as an option for enterprise B2B merchants.
+- Health check tied to deep readiness probe (DB + Redis + Kafka reachable).
 
-**Responsibilities:** request routing to right service, version routing (`/v1`, `/v2`), request transformation, basic rate limiting, observability hook.
+### 3.2 API gateway
 
-**Tech picks:** **Kong** (open-source + enterprise tier), **Spring Cloud Gateway** (if Java team), **AWS API Gateway** (managed but vendor-lock + cold-start tax).
+**What:** the single entry point into the platform.
 
-**LLD details:**
-- Plugin chain: auth → rate-limit → request-transform → upstream-route → response-transform → log.
-- Latency budget for gateway: **< 10 ms p99**.
-- Horizontal scale: stateless, scale on CPU + connection count.
+**Why:** decouples public API surface from internal services; centralizes cross-cutting concerns (auth, rate limit, observability, versioning); makes service evolution safer.
 
-**Why not Nginx:** Nginx is great as a reverse proxy but lacks the plugin ecosystem (auth, rate-limit, observability) — you'd build it yourself.
+**How:**
+- Pick: **Kong**, **Envoy**, **Spring Cloud Gateway**, or **AWS API Gateway**.
+- Plugin chain: auth → rate-limit → request transform → upstream route → response transform → log.
+- Latency budget: < 10 ms p99.
+- Horizontally scaled; stateless.
 
-### 3.3 Auth layer
+**MNC reality:**
+- API versioning via URL prefix (`/v1`, `/v2`); old versions deprecated on 12-month notice.
+- Schema validation at the gateway (OpenAPI / Protobuf) — invalid requests fail at the perimeter.
+- Per-route SLOs; gateway dashboards split by route + merchant.
 
-**Multi-mode auth** (different clients, different needs):
+**Why not Nginx alone:** Nginx is a great reverse proxy but lacks the plugin ecosystem (declarative auth, advanced rate limit, observability). You'd end up rebuilding the gateway.
 
-| Mode | Used by | How |
+### 3.3 Authentication + authorization
+
+**What:** verifies the caller and resolves merchant context.
+
+**Why:** every payment must be attributable to a known merchant with a defined risk profile, fee structure, and entitlement.
+
+**How (multi-mode):**
+
+| Mode | Used by | Mechanism |
 |---|---|---|
-| **API key + HMAC-SHA256** | Server-to-server B2B integrations | Header: `X-API-Key`, body signed with `HMAC-SHA256(secret, payload)` in `X-Signature`. Verify timestamp window (≤ 5 min) to prevent replay. |
-| **JWT (RS256)** | Hosted checkout / merchant dashboard | Short-lived (15 min) access token + 24h refresh. Verify signature with rotating JWKS. |
-| **mTLS** | High-trust B2B (banks, large enterprises) | Client cert presented at edge; cert thumbprint → merchant lookup. Anchor: **GPay 3-layer security** (STAR 3). |
-| **OAuth 2.0** | Customer-facing payment flows where consent matters | Authorization Code + PKCE for SPA; refresh tokens for app installs. |
+| **API key + HMAC-SHA256** | Server-to-server | Header `X-API-Key`, body signed with HMAC; timestamp window ≤ 5 min prevents replay |
+| **JWT (RS256)** | Hosted checkout sessions | Short-lived (15 min) access token + refresh; verified via rotating JWKS |
+| **OAuth 2.0** | Customer-consent flows | Authorization Code + PKCE for SPAs; refresh tokens for installed apps |
+| **mTLS** | Bank-grade B2B | Client cert at edge; cert thumbprint → merchant mapping |
 
-**Anchor:** the same three-layer pattern used for GPay term-loan integration — JWT for app auth + PGP for payload + TLS 1.3 mTLS for transport. Passed Google's security review on first attempt (STAR 3).
-
-**LLD note:** **never** put the auth logic in the gateway plugin alone. Have a dedicated `auth-service` that the gateway delegates to, with its own cache, audit log, and ability to revoke API keys instantly (Redis-backed revocation list).
+**MNC reality:**
+- A dedicated `auth-service`, not just a gateway plugin. Caches credentials in Redis; supports instant revocation via revocation list.
+- Audit log every auth decision (success + failure) with PII scrubbed.
+- Key rotation enforced quarterly; old keys grace-period 30 days.
+- Roles: a merchant has multiple API keys with scopes (`payments:write`, `payouts:write`, `refunds:write`).
 
 ### 3.4 Rate limiting
 
-**Algorithm:** **token bucket** via Redis Lua script (atomic).
+**What:** prevents abuse and protects downstream from accidental DOS.
+
+**Why:** a misconfigured merchant cron or a runaway script can melt the system; we never want a single merchant to take down others.
+
+**How:**
+- Algorithm: **token bucket** (smooth bursts) or **sliding window log** (strict).
+- Implementation: Redis Lua script for atomic refill + decrement.
+- Per-merchant + per-route limits; tiered (Free, Standard, Enterprise, Custom).
+- Quotas published to merchants via `X-RateLimit-Remaining` header; `429` with `Retry-After` on exceed.
+
+**MNC reality:**
+- Two limits enforced together: per-second (burst) and per-day (quota).
+- Hard limits + soft limits; soft sends a warning webhook; hard rejects.
+- Bypassable for trusted internal merchants via signed token (e.g., during a planned sale event).
+
+### 3.5 Idempotency layer
+
+**What:** ensures a duplicate request (caused by network retry, client bug, or operator retry) does not result in a duplicate payment.
+
+**Why:** money-moving systems cannot afford double-charges. Idempotency is the single most important property of a payment API.
+
+**How (Stripe's canonical pattern, copied industry-wide):**
+
+1. Caller sends an `Idempotency-Key` header (UUID, recommended scope: per-attempt).
+2. Server stores `(merchant_id, idempotency_key)` → full response in a fast store (Redis) with 24h TTL.
+3. **Three layers of dedup:**
+   - **Redis cached response** (fast path, sub-ms).
+   - **Distributed lock** keyed by idempotency key (serializes concurrent first-runs).
+   - **DB unique constraint** on `(merchant_id, idempotency_key)` (correctness net if Redis is lost).
+4. Server returns the **same response body** for the same key — even if the underlying request body differs (some implementations reject mismatched bodies as `409`).
+
+**MNC reality:**
+- Stripe holds idempotency results 24h; Adyen up to 7 days. Industry norm is 24h - 7d.
+- The lock is short-lived (≤ 30s); long-lived locks cause stampedes if the first attempt is slow.
+- Mismatched-body handling is a contract decision: silently return cached vs `409 Conflict`. Most modern APIs return `409`.
+
+### 3.6 Transaction orchestrator + state machine
+
+**What:** the brain of the platform. Drives a payment through its lifecycle.
+
+**Why:** payments have many intermediate states (initiated, authorized, captured, settled, refunded, disputed). A flat boolean model breaks down fast. A state machine gives compile-time-checkable transitions + clean audit.
+
+**Canonical state diagram:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> INITIATED
+    INITIATED --> AUTHORIZED: PSP auth success
+    INITIATED --> FAILED: PSP decline / timeout / risk block
+    AUTHORIZED --> CAPTURED: capture API or auto-capture
+    AUTHORIZED --> VOIDED: void before capture
+    AUTHORIZED --> EXPIRED: auth window expired (~7d for cards)
+    CAPTURED --> SETTLED: included in settlement batch
+    CAPTURED --> REFUND_INITIATED: refund API called
+    SETTLED --> DISPUTED: chargeback raised
+    REFUND_INITIATED --> REFUNDED: PSP confirms refund
+    REFUND_INITIATED --> REFUND_FAILED: PSP rejects
+    DISPUTED --> DISPUTE_WON
+    DISPUTED --> DISPUTE_LOST
+    FAILED --> [*]
+    VOIDED --> [*]
+    EXPIRED --> [*]
+    REFUNDED --> [*]
+    DISPUTE_WON --> [*]
+    DISPUTE_LOST --> [*]
+```
+
+**How:**
+- All state mutations go through one method (`transition(txnId, newState, reason, actor)`).
+- Each transition validates source state, writes the new state, appends an audit row, emits a domain event via the outbox.
+- Forbidden transitions throw — `CAPTURED → INITIATED` is impossible.
+
+**MNC reality:**
+- The state machine is enforced in code AND in the DB (CHECK constraint on a `status` column, or a generated column that fails on invalid transitions in a trigger).
+- The audit / history table is immutable, append-only; one row per transition; queries answer "show me the timeline of txn X" in O(1).
+- Saga compensation is built on the same primitive — failed downstream emits a compensating transition.
+
+### 3.7 Smart router (PSP routing)
+
+**What:** decides which PSP / acquirer handles a given txn.
+
+**Why:** in real fintech you integrate with 5-20 PSPs per region. They differ in cost (MDR), success rate per bank/issuer, geography, mode coverage, and uptime. Routing intelligence is a competitive moat.
+
+**Routing inputs:**
+
+| Input | Why it matters |
+|---|---|
+| Payment mode | Cards-only PSPs cannot do UPI |
+| Currency + country | Cross-border may need a specific acquirer |
+| Issuer BIN | Some PSPs have better success-rates per issuer |
+| Merchant config | Some merchants on-boarded to specific PSPs only |
+| Cost (MDR) | Pick cheaper PSP all else equal |
+| Real-time success-rate (last 5 min) | Prefer healthier PSP |
+| Circuit-breaker state per PSP | Skip OPEN circuits |
+| Volume + tier | High-volume merchants get the best PSP relationships |
+
+**How:**
+- Each PSP has a connector implementing a common interface (`charge`, `refund`, `void`, `query`).
+- Spring-style component registry auto-discovers connectors by `@PaymentMode("CARD")`.
+- Routing strategy is a **priority list** with health filtering, cost ordering, then random tie-breaker (for load distribution).
+- Resilience4j circuit breaker per PSP-mode combo: open after 5 consecutive failures or SR < 95% over last 100 attempts; half-open after 30s with one probe.
+- Bulkhead per PSP (separate thread pool / connection pool) so a slow PSP cannot starve the others.
+
+**MNC reality:**
+- The routing decision is logged for every txn (`psp_decision_log`) so post-incident "why did this txn go to PSP X" is one query.
+- Failover retries the **same txn** with the **same idempotency key** at the next PSP — but with the **PSP's own idempotency token** scoped to that PSP. Double-routing risk is mitigated at the reconciliation layer.
+- A/B testing of routing rules via shadow-traffic before promotion.
+
+### 3.8 Mode handlers (per-rail logic)
+
+#### Cards
+
+- Auth-only vs auth+capture vs auth then later capture.
+- 3DS 2.0 — frictionless (issuer scores risk silently) for ~80% of txns; challenge (OTP / biometric) for the rest.
+- Tokenization mandate: store network tokens (Visa Token Service, Mastercard MDES), never raw PAN. Reduces PCI scope.
+- 3DS liability shift: authenticated txn shifts chargeback liability to issuer.
+
+#### UPI / Pix / instant-rails
+
+- Push (merchant initiates) vs pull (customer scans QR or enters VPA).
+- Webhook-driven; PSP fires our callback when bank confirms.
+- Status polling fallback (every 30s for up to 5 min) if webhook is dropped.
+- AutoPay mandate flows: regulator-mandated 24h notification before recurring charge (India RBI rule).
+
+#### Net banking
+
+- Bank-hosted redirect; customer leaves our domain.
+- Per-bank quirks (50+ Indian banks each have idiosyncratic APIs); abstraction layer + per-bank adapter is mandatory.
+- Webhooks unreliable for ~5% of banks; polling is the default.
+
+#### Wallets
+
+- Redirect-then-callback similar to net banking, but auth is wallet-native (PIN, biometric).
+- Some support direct token exchange without redirect (Paytm, Apple Pay).
+
+#### EMI
+
+- Three flavors: bank EMI (card auth, bank converts), no-cost EMI (merchant subsidizes), cardless EMI (NBFC underwrites at checkout — effectively a loan flow).
+
+#### B2B / payouts
+
+| Rail | Mode | Limits | Cost | Settlement |
+|---|---|---|---|---|
+| IMPS | Real-time 24×7 | ≤ ₹5L | ₹2-5 | Instant |
+| NEFT | Half-hourly batch | None | ₹1-2 | Same day |
+| RTGS | Real-time, biz hours | ≥ ₹2L | ₹15-50 | Instant |
+| UPI payout | Real-time 24×7 | ≤ ₹1L | Free | Instant |
+| ACH (US) | Daily batch | None | Cents | T+1-T+3 |
+| SEPA (EU) | Instant or batch | None | Cents | Instant or T+1 |
+| SWIFT (cross-border) | Wire | None | $15-50 | T+1-T+5 |
+
+Beneficiary verification (penny-drop) before first payout to any new account.
+
+### 3.9 Risk + fraud engine
+
+**What:** decides allow / block / challenge for each txn.
+
+**Why:** fraud rates in card-not-present are 5-10x card-present. ML-driven risk scoring is a competitive lever and a compliance requirement.
+
+**How (three-tier defence):**
+
+1. **Synchronous rules engine** (< 50 ms): hard rules (BIN blocklist, IP blocklist, velocity, amount > merchant limit). Decisioning is `BLOCK / CHALLENGE / ALLOW`.
+2. **Synchronous ML risk score** (< 100 ms): gradient-boosted tree (XGBoost / LightGBM) or neural net trained on labeled historical data. Score 0-1; threshold-driven action (e.g., > 0.8 → challenge with 3DS).
+3. **Asynchronous pattern detection**: Kafka stream → Flink job → detects velocity anomalies (same card across 5 merchants in 10 min), bot patterns, mule-account graphs. Updates blocklists + retrains model.
+
+**MNC reality:**
+- Stripe Radar, Adyen RevenueProtect, Razorpay Thirdwatch — all are this pattern.
+- Per-merchant tunable risk thresholds (a sneaker drop tolerates higher risk than a high-AOV electronics merchant).
+- Explainability for compliance: every block / challenge has a reason code logged.
+- Human-in-loop review queue for borderline scores in regulated segments.
+
+### 3.10 Tokenization + Vault + HSM
+
+**What:** anywhere a Primary Account Number (PAN), CVV, or PIN block must be handled, it is isolated in a hardened, PCI-DSS-segmented zone.
+
+**Why:** PAN storage triggers full PCI-DSS scope. Tokenization moves the regulated boundary to a small, well-audited subsystem; the rest of the platform handles tokens, drastically reducing audit surface and breach blast-radius.
+
+**How:**
+- First card txn: PSP returns a **network token** (Visa Token Service / MDES) on first capture. We persist `(token, last_4, brand, expiry, merchant_id)`. We never see raw PAN beyond the moment it transits our tokenization service.
+- HSM (AWS CloudHSM, Thales nShield, Azure Dedicated HSM) handles cryptographic operations: PIN block encryption, CVV verification, key wrap. Keys never leave the HSM in plaintext.
+- Vault (HashiCorp Vault, AWS Secrets Manager) handles all non-card secrets: PSP API keys, merchant signing keys, DB credentials. Dynamic / short-lived credentials wherever possible.
+
+**MNC reality:**
+- A tiny `tokenization-service` is the only service inside the PCI cardholder data environment (CDE). 95%+ of the platform is **out of PCI scope**.
+- PAN-bearing logs are blocked at structured-logging middleware (mask on field name pattern `(card|pan|cvv|cvc)`).
+- KMS-rooted encryption at rest for every DB, S3 bucket, EBS volume.
+- Annual third-party PT (Synack, Cobalt) + bug bounty (HackerOne).
+
+### 3.11 Double-entry ledger
+
+**What:** the canonical source of "who owes what to whom" at any point in time.
+
+**Why:** payment systems must produce a balance sheet that always balances. Single-entry "we charged the customer X" is not enough — you also need to track merchant payable, PSP receivable, fees, taxes, refund reserves, dispute holds. Double-entry is the time-tested abstraction.
+
+**How:**
+- Two tables: `account` (entity, type, currency) and `posting` (debit account, credit account, amount, txn_id, posted_at, idempotency_key).
+- Every txn produces a balanced journal entry: debits = credits.
+- Example (a successful card capture for ₹1000 with ₹20 fee):
+
+  | Debit | Credit | Amount | Note |
+  |---|---|---|---|
+  | Customer-card-receivable | Suspense | 1000 | Authorization |
+  | Suspense | Merchant-payable | 980 | Capture, net of fee |
+  | Suspense | Platform-fee-income | 20 | Fee recognition |
+
+- Account balances are derived (sum of postings), not stored — eliminates a class of bugs where a stored balance drifts from the postings.
+- For performance at scale, materialized balance views are refreshed via CDC.
+
+**MNC reality:**
+- Stripe (TigerBeetle inspirations), Razorpay, Square, every neobank — all have a ledger service.
+- Ledger is **append-only**. Mistakes are corrected via reversing entries, never updates.
+- Daily ledger close: every account balance reconciled against bank statements + PSP files.
+- Ledger is the **second source of truth** alongside the txn table; recon proves they agree.
+
+### 3.12 Settlement engine
+
+**What:** moves money from our holding account to merchant bank accounts on a schedule.
+
+**Why:** between capture and merchant payout, funds sit in our nodal/escrow account (regulator requirement). Settlement is the scheduled sweep.
+
+**How (T+1 daily example):**
+
+```
+06:00  Lock the settlement window for date D (yesterday)
+06:05  Aggregate by merchant: gross captured - refunds - chargeback debits - fees - GST = net payable
+06:15  Idempotently create settlement_batch (UNIQUE on merchant_id + date) + per-txn settlement_item
+06:30  Initiate B2B transfer (NEFT/IMPS/ACH) per merchant
+07:00  On bank confirmation, write reverse ledger entry + fire webhook to merchant
+07:30  Upload settlement statement PDF/CSV to merchant dashboard
+```
+
+**MNC reality:**
+- Multiple settlement cycles per day (T+0, T+1, T+7 — merchant-configurable).
+- Per-merchant reserve / rolling reserve (% of volume held for chargeback exposure).
+- Currency conversion handled at the settlement boundary (we collected USD, merchant settles in INR; FX margin booked to FX-income account).
+- Settlement statement is regulator-grade (SOX-auditable in US; equivalent locally).
+
+### 3.13 Reconciliation engine
+
+**What:** matches our internal ledger against the PSP / bank / network counterparties.
+
+**Why:** truth lives in three places — our books, the PSP's books, the bank's books. They must agree. Where they disagree (the "exception queue"), humans investigate before money is misallocated.
+
+**How:**
+1. Each PSP / bank sends a daily SFTP file (CSV / JSON / XML).
+2. Parser loads rows into `recon_raw` staging.
+3. Three-way match by `(psp_reference, amount, date)`:
+   - **MATCHED** — internal + PSP + bank all agree. Archive.
+   - **PSP_ONLY** — PSP has it, we don't. Replay (missed webhook).
+   - **INTERNAL_ONLY** — we have it, PSP doesn't. Investigate (manual queue).
+   - **BANK_ONLY** — bank settled something neither side knows about. Investigate.
+4. Auto-resolve configured patterns (timezone offsets, fee rounding, T-boundary cases).
+5. Manual queue for everything else; SLA: cleared by next business day.
+
+**MNC reality:**
+- Recon match rate is a top-line SRE metric. SLO: > 99.5% auto-matched within 24h.
+- Exception queue value is bounded (e.g., < ₹10L unresolved at any time) — breaching the bound is a P1 alert.
+- Recon is the **independent check** that double-entry ledger and live txn table agree.
+
+### 3.14 Webhook delivery
+
+**What:** notifies merchants asynchronously when a txn state changes.
+
+**Why:** merchant servers cannot poll us every second for every txn. Webhooks make the system push-based and merchant-friendly.
+
+**How:**
+- State transition writes to `webhook_outbox` in the **same DB transaction** as the txn state change (outbox pattern — eliminates dual-write inconsistency).
+- Outbox dispatcher (separate worker) reads outbox, posts to merchant URL, signs with HMAC-SHA256, retries with backoff.
+- Schedule: 1m → 5m → 15m → 1h → 6h → 24h. Six attempts, ~31h total window.
+- After max attempts → dead-letter queue (manual replay tool for ops).
+- HMAC over `timestamp + body`; merchant verifies on their side with their secret. `X-Timestamp` window 5 min prevents replay.
+
+**MNC reality:**
+- At-least-once delivery — merchants must be idempotent on their side. We document this.
+- Per-merchant delivery isolation (one slow merchant URL doesn't block others) via per-merchant queues or sharded workers.
+- Webhook delivery dashboard for merchants: see attempts, failures, replay manually.
+- Signature versioning (`v1=...`) so we can rotate algorithms later.
+
+### 3.15 Refund + dispute / chargeback
+
+**Refund flow** (orchestrated saga):
+
+```mermaid
+sequenceDiagram
+    participant Merchant
+    participant API
+    participant Orch
+    participant Ledger
+    participant PSP
+    participant Kafka
+
+    Merchant->>API: POST /refunds (txn_id, amount, idem_key)
+    API->>Orch: validate idempotency + amount ≤ refundable
+    Orch->>Ledger: reserve refund (post compensating entries)
+    Orch->>PSP: refund API (idempotency token = our refund_id)
+    PSP-->>Orch: ack (sync) or webhook (async)
+    Orch->>Kafka: refund-event
+    Kafka->>Merchant: webhook notify
+```
+
+- If PSP refund fails post-ledger-reservation, **compensating ledger entries** unwind the reserve.
+- Customer-facing wording: "Refund will reflect in 5-7 business days" (RBI / regional guidance).
+
+**Dispute / chargeback lifecycle:**
+
+| Stage | Trigger | Action |
+|---|---|---|
+| Retrieval request | Issuer asks for txn details | Auto-respond with receipt + proof |
+| Chargeback raised | Customer disputes via issuer | Reverse merchant balance; debit dispute holding |
+| Pre-arbitration / representment | Merchant submits evidence | Forward to PSP / network |
+| Arbitration | Network rules | Final disposition |
+| Outcome | Won / lost | Final ledger postings |
+
+**MNC reality:**
+- Dispute rate is a key risk metric (Visa caps at 1%, MC at 1.5%); merchants exceeding thresholds get fee penalties or termination.
+- Evidence collection is automated (auto-bundle receipts, shipping proofs, customer comms) and submitted via PSP API.
+
+### 3.16 Analytics + reporting
+
+**What:** offline / near-real-time aggregates for merchants and internal BI.
+
+**Why:** dashboards must answer "last 30 days revenue by mode" in seconds. Doing this on the OLTP master is a guaranteed outage.
+
+**How:**
+- CDC from Postgres via Debezium → Kafka → ClickHouse or Snowflake sink.
+- Hot data (7 days) in ClickHouse / Snowflake's "hot" tier; warm (90 days) in standard; cold (years) in S3 (Parquet).
+- Merchant dashboard reads aggregates from the OLAP store.
+- Internal BI uses Metabase / Looker / Tableau on top.
+- Elasticsearch for txn search (faceted: by status, mode, time range, customer).
+
+**MNC reality:**
+- Dual write to OLTP and OLAP is **never** done directly from app code — always via CDC. Avoids inconsistency.
+- Schema evolution in OLAP is decoupled from OLTP via a transform layer (dbt / Airflow).
+
+---
+
+## SECTION 4 — DATA MODEL
+
+### 4.1 Core tables
+
+```sql
+-- The transaction
+CREATE TABLE txn (
+    txn_id          UUID PRIMARY KEY,
+    merchant_id     UUID NOT NULL,
+    amount          BIGINT NOT NULL,       -- minor units (paise / cents)
+    currency        CHAR(3) NOT NULL,
+    payment_mode    VARCHAR(20) NOT NULL,
+    status          VARCHAR(30) NOT NULL,
+    psp_name        VARCHAR(50),
+    psp_txn_id      VARCHAR(100),
+    customer_ref    VARCHAR(64),           -- masked / tokenized
+    metadata        JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    INDEX idx_merchant_created (merchant_id, created_at DESC),
+    INDEX idx_psp (psp_name, psp_txn_id),
+    INDEX idx_status_created (status, created_at)
+) PARTITION BY RANGE (created_at);
+
+-- Audit / state history (append-only, immutable)
+CREATE TABLE txn_event (
+    event_id        BIGSERIAL PRIMARY KEY,
+    txn_id          UUID NOT NULL,
+    prev_status     VARCHAR(30),
+    new_status      VARCHAR(30) NOT NULL,
+    actor           VARCHAR(50) NOT NULL,
+    reason          VARCHAR(200),
+    metadata        JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    INDEX idx_txn_created (txn_id, created_at)
+) PARTITION BY RANGE (created_at);
+
+-- Idempotency dedup
+CREATE TABLE idempotency_record (
+    merchant_id     UUID NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    txn_id          UUID NOT NULL,
+    request_hash    CHAR(64) NOT NULL,     -- SHA-256 of canonicalized request
+    response_body   JSONB NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (merchant_id, idempotency_key)
+);
+
+-- Double-entry ledger
+CREATE TABLE ledger_account (
+    account_id      UUID PRIMARY KEY,
+    entity_type     VARCHAR(20),           -- MERCHANT / CUSTOMER / PLATFORM / PSP / SUSPENSE
+    entity_id       UUID,
+    currency        CHAR(3),
+    UNIQUE (entity_type, entity_id, currency)
+);
+
+CREATE TABLE ledger_posting (
+    posting_id      BIGSERIAL PRIMARY KEY,
+    journal_id      UUID NOT NULL,          -- groups balanced entries
+    debit_account   UUID NOT NULL,
+    credit_account  UUID NOT NULL,
+    amount          BIGINT NOT NULL,
+    currency        CHAR(3) NOT NULL,
+    txn_id          UUID,
+    posted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    idempotency_key VARCHAR(128) NOT NULL,
+    UNIQUE (idempotency_key)
+);
+
+-- Webhook outbox
+CREATE TABLE webhook_outbox (
+    outbox_id       UUID PRIMARY KEY,
+    merchant_id     UUID NOT NULL,
+    event_type      VARCHAR(50) NOT NULL,
+    payload         JSONB NOT NULL,
+    status          VARCHAR(20) NOT NULL,   -- PENDING / RETRYING / DELIVERED / FAILED
+    attempts        INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,
+    delivered_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    INDEX idx_status_next (status, next_attempt_at)
+);
+
+-- Settlement
+CREATE TABLE settlement_batch (
+    batch_id        UUID PRIMARY KEY,
+    merchant_id     UUID NOT NULL,
+    settlement_date DATE NOT NULL,
+    gross_amount    BIGINT NOT NULL,
+    fee_amount      BIGINT NOT NULL,
+    tax_amount      BIGINT NOT NULL,
+    refund_amount   BIGINT NOT NULL,
+    net_amount      BIGINT NOT NULL,
+    status          VARCHAR(20) NOT NULL,
+    bank_utr        VARCHAR(64),
+    UNIQUE (merchant_id, settlement_date)    -- idempotency at the table level
+);
+```
+
+### 4.2 Partitioning + sharding strategy
+
+| Table | Partition / shard scheme | Why |
+|---|---|---|
+| `txn` | Partition by `created_at` month | Hot vs cold separation; cheap archive |
+| `txn_event` | Partition by `created_at` month | Append-only; massive volume; drop old partitions to S3 |
+| `ledger_posting` | Partition by `posted_at` month | Same |
+| `idempotency_record` | Partition by `expires_at` day | Drop expired partitions wholesale |
+| `webhook_outbox` | None initially; partition if needed | Bounded set; cleared on delivery |
+
+**Sharding by merchant:**
+- Threshold: single primary cannot keep up with write rate (~5K-10K writes/sec) or storage (~5 TB).
+- Pick **merchant_id** as shard key — every authenticated call carries the merchant; cross-merchant queries are rare (ops only).
+- Tooling: **Vitess** for transparent MySQL sharding, **Citus** for Postgres, or app-level shard router.
+- Never shard by `txn_id` hash — kills per-merchant dashboards.
+
+### 4.3 Data retention
+
+| Data | Retention | Storage |
+|---|---|---|
+| Hot txn / events / ledger | 30 days | Postgres OLTP |
+| Warm txn / events / ledger | 11 months | Postgres + read replicas |
+| Cold | 6 years (regulator) | S3 Parquet, queried via Athena / Trino |
+| Idempotency | 24h - 7d | Redis + Postgres |
+| Audit / compliance | 7 years | S3 with Object Lock (immutable) |
+| Raw logs (with PII masked) | 90 days | Coralogix / Datadog / ELK |
+
+---
+
+## SECTION 5 — MIDDLEWARE & TECHNOLOGY PICKS
+
+### 5.1 The full picks table
+
+| Concern | Industry pick | Why this, not the alternative |
+|---|---|---|
+| **OLTP database** | PostgreSQL (Citus for shard) or MySQL (Vitess for shard) | Mature, ACID, ecosystem. Aurora / Cloud SQL acceptable managed flavors. |
+| **Event spine** | Apache Kafka (RF=3, min.insync.replicas=2, acks=all) | Durable replayable log; partitions for per-key ordering. Pulsar a fine alternative. RabbitMQ inadequate (no replay). SQS too thin (no consumer groups, 14-day cap). |
+| **Cache + locks + rate limit** | Redis Cluster + Redisson | Sub-ms p99; rich data structures; Redisson gives `RLock`, `RRateLimiter`, `RBucket` out of box. Memcached too thin. |
+| **Search** | Elasticsearch (via Debezium CDC) | Faceted txn search, fast aggregations. Never source of truth. |
+| **OLAP / BI** | ClickHouse, Snowflake, or BigQuery | 100x faster than OLTP for aggregates. Snowflake managed; ClickHouse cheaper at scale. |
+| **Object store** | AWS S3 (with Object Lock) | Recon files, receipts, evidence, audit archive. PCI-friendly. |
+| **Secrets** | HashiCorp Vault + AWS KMS | Dynamic creds, rotation, audit. |
+| **HSM** | AWS CloudHSM, Thales nShield | FIPS 140-2 L3 for card crypto. |
+| **API gateway** | Kong or Envoy or Spring Cloud Gateway | Auth + rate limit + routing + observability in one. |
+| **Service mesh (optional)** | Istio or Linkerd | mTLS between services; canary; tracing. |
+| **Circuit breaker** | Resilience4j | Per-PSP isolation; lightweight; Hystrix EOL. |
+| **Distributed tracing** | OpenTelemetry → Tempo / Jaeger / Datadog | Vendor-neutral SDKs. |
+| **Metrics** | Prometheus + Grafana | De-facto standard. |
+| **Logs** | OpenTelemetry logs → Loki / Datadog / Splunk | Structured JSON; PII-mask middleware. |
+| **Container orchestration** | Kubernetes (EKS / GKE / AKS) | Industry standard. |
+| **CDC** | Debezium (Kafka Connect) | Binlog/WAL-based; avoids dual-writes. |
+| **Schema migrations** | Liquibase or Flyway + gh-ost / pg_repack for online DDL | Audit trail; no replication-lag spikes. |
+| **Feature flags / config** | LaunchDarkly, Unleash, or in-house | Per-merchant, per-region toggles; safe rollbacks. |
+| **CI/CD** | GitHub Actions + ArgoCD or Spinnaker | GitOps; drift detection; multi-env promotion. |
+| **WAF + DDoS** | Cloudflare + AWS WAF + AWS Shield Advanced | Defense in depth. |
+| **CDN** | CloudFront / Fastly / Akamai | Static asset edge cache. |
+
+### 5.2 Defensible alternative choices
+
+- **Postgres vs MySQL** — both fine. Postgres has stronger consistency primitives (advisory locks, SKIP LOCKED, partial indexes). MySQL has more mature sharding tooling (Vitess). Pick based on team familiarity.
+- **Kafka vs Pulsar** — Pulsar's tiered storage is nicer at extreme scale; Kafka's ecosystem is bigger; Kafka wins on hiring + tooling.
+- **Vault vs AWS Secrets Manager** — Vault is more powerful (dynamic creds for any backend); ASM is simpler if you're all-AWS.
+- **Self-hosted Kubernetes vs ECS / Cloud Run** — K8s is industry-standard; managed alternatives reduce ops burden at the cost of flexibility.
+
+---
+
+## SECTION 6 — CRITICAL PATTERNS (cross-cutting)
+
+### 6.1 The pattern catalog
+
+| Pattern | Used in | Why |
+|---|---|---|
+| **Idempotency** | Every mutating endpoint | Safe retries; the most important property in payments |
+| **State machine** | Txn lifecycle, refund lifecycle, dispute lifecycle | Compile-time + runtime-enforced transitions |
+| **Outbox** | Any cross-system event emission | Atomic state-change + event; no dual-write inconsistency |
+| **Saga (orchestration)** | Refund, dispute, multi-step payouts | Long-running distributed txns with compensating actions |
+| **Circuit breaker** | Per PSP, per external dep | Stop hammering a dying dependency |
+| **Bulkhead** | Per-PSP thread pools / connection pools | One slow PSP doesn't starve others |
+| **Retry with exponential backoff + jitter** | Async retries (webhooks, PSP polling) | Avoids thundering herd |
+| **CQRS** | Write to Postgres OLTP; read txn search from Elasticsearch | Different stores for different access patterns |
+| **CDC** | Postgres → Kafka → ES, CH, search | Avoids dual-writes; eventually consistent projections |
+| **Double-entry ledger** | All money movement | Balance sheet always balances by invariant |
+| **Defensive cache eviction at write site** | Anywhere a write must be visible to next read | TTL is availability, not coherence |
+| **Tokenization** | PAN / sensitive data | PCI scope reduction |
+| **Always-200 webhook intake from PSPs** | All PSP callbacks | Decouple intake from processing; persist first, process async |
+| **Always-secure webhook delivery to merchants** | All outbound webhooks | HMAC + timestamp + retry + DLQ |
+
+### 6.2 The outbox pattern (worth its own subsection)
+
+**Problem:** "I just updated the txn to CAPTURED in Postgres. Now I publish to Kafka. Kafka publish fails. Postgres is committed. Downstream never knows. ❌"
+
+**Solution:**
+1. In the same DB transaction as the state change, write a row to `outbox` table with the event payload.
+2. A separate worker tails the outbox (via CDC or polling), publishes to Kafka, marks the row delivered.
+3. At-least-once delivery to Kafka guaranteed because outbox is the source of truth.
+
+**Why it matters:** every interview-quality payment design has this. Without it, you have dual-write inconsistency between DB and Kafka. With it, the system is provably consistent.
+
+---
+
+## SECTION 7 — SCALE & PERFORMANCE
+
+### 7.1 The scaling ladder
+
+A senior interviewer wants to hear: "we don't optimize prematurely. We start with vertical, then read scale, then cache, then shard, then split services."
+
+```
+Level 1 (≤ 1K RPS)
+  Single primary DB + 1 replica + Redis + Kafka small cluster
+  Single region. All-on-one-K8s-cluster.
+
+Level 2 (1K - 10K RPS)
+  Beefier primary; 2-4 read replicas; route reads off master with AOP / proxy.
+  Redis Sentinel or Cluster (small).
+  Multi-AZ within one region.
+
+Level 3 (10K - 50K RPS)
+  Multi-AZ HA Postgres (Patroni or managed Aurora);
+  Redis Cluster with replication; Kafka 6+ brokers.
+  Service splits by domain (txn, ledger, recon, webhook, settlement).
+
+Level 4 (50K - 200K RPS)
+  Shard OLTP by merchant_id (Vitess / Citus).
+  Multi-region active-active with per-merchant region affinity.
+  Kafka cross-region replication via MirrorMaker 2.
+
+Level 5 (> 200K RPS)
+  Custom in-memory ledger (TigerBeetle style);
+  Cell-based architecture (per-cell merchant assignment, blast-radius bounded);
+  Active-active across 3+ regions.
+```
+
+### 7.2 Per-component capacity sketch (at 20K RPS peak)
+
+| Component | Pods / nodes | Notes |
+|---|---|---|
+| Edge / LB | 2-3 per region | Bandwidth-bound |
+| API Gateway | 8-12 | CPU on auth + rate limit |
+| Auth service | 4-6 | Redis lookup-bound |
+| Orchestrator | 16-24 | DB write-bound |
+| Smart router | 8-12 | PSP latency-bound |
+| Connectors | 4-8 per mode | PSP-API-latency-bound |
+| Webhook delivery | 4-6 (async) | Outbound HTTP-bound |
+| Settlement | 1 (cron) | Batch window |
+| Recon | 1 (cron) | Batch window |
+| Postgres primary | 1 + standby | r5.4xlarge or larger |
+| Postgres replicas | 4-6 | One per heavy read consumer |
+| Redis | 6-node Cluster | Memory-bound |
+| Kafka | 6-9 brokers | Disk IO + network bound |
+
+### 7.3 Caching strategy by use case
+
+| Cache | Pattern | TTL | Why |
+|---|---|---|---|
+| Idempotency key → response | Write-through | 24h - 7d | Must survive restart |
+| Merchant config | Refresh-ahead | 5 min | Rare update; freshness matters |
+| API key → merchant | Cache-aside | 15 min | Read-heavy |
+| PSP routing config | Refresh-ahead | 5 min | Hot reload on change |
+| Txn status (read-after-write) | Cache-aside + evict-on-write | 60 s | TTL is availability, not coherence |
+| Rate-limit counters | Atomic (Lua) | n/a | Storage only |
+
+### 7.4 Sync vs async paths
+
+| Path | Sync / async | Why |
+|---|---|---|
+| Auth + capture | Sync (≤ 500 ms) | Customer is waiting |
+| Refund initiation | Sync ack + async PSP | PSP refund APIs often async |
+| Webhook delivery | Async | Merchant may be slow / down |
+| Settlement | Async (cron) | Daily; nobody waiting |
+| Recon | Async (cron) | EOD batch |
+| Notifications (SMS / email) | Async | Best-effort |
+| Analytics ingestion | Async (CDC) | Don't add latency to write path |
+
+### 7.5 Autoscaling
+
+- **HPA on K8s** by CPU + custom metric (Kafka consumer lag, queue depth).
+- **KEDA** for event-driven scaling (Kafka lag, SQS depth).
+- **Predictive scaling** for known events (Black Friday, salary day, sale launches). Pre-scale 30 min before.
+- **Database does NOT autoscale** — provision for 2x steady-state peak, alert at 70% to plan vertical or shard.
+
+---
+
+## SECTION 8 — SECURITY + COMPLIANCE
+
+### 8.1 PCI-DSS Level 1 obligations
+
+- Network segmentation between Cardholder Data Environment (CDE) and rest of platform.
+- Quarterly internal vulnerability scans + annual external pen test by QSA.
+- Encryption at rest (AES-256) + in transit (TLS 1.2+, 1.3 preferred).
+- Strong access control (MFA, least privilege).
+- Logs retained 1 year (immediate access 3 months).
+- Annual SAQ-D or RoC.
+
+**Scope reduction strategy:** keep PAN out of all services except the tokenization-service. Use network tokens (Visa Token Service, MDES) end-to-end.
+
+### 8.2 Layered defense
+
+| Layer | Control |
+|---|---|
+| Network | VPC isolation, security groups, NACLs, private subnets, no public DB |
+| Transport | TLS 1.3 mandatory; mTLS for B2B; HSTS |
+| API | API key + HMAC + timestamp + nonce |
+| Payload | Optional PGP-encrypted fields for ultra-sensitive integrations |
+| Auth | OAuth + JWT (RS256, rotating JWKS); MFA on merchant dashboard |
+| Authorization | RBAC + ABAC; scoped API keys |
+| Data at rest | AES-256 via KMS; HSM-backed keys for cardholder data |
+| Secrets | Vault dynamic creds; no static creds in code or env |
+| Logging | PII masking at structured log middleware; no PAN, CVV, OTP in logs |
+| Monitoring | SIEM (Splunk, Datadog SIEM); anomaly alerts |
+| Pen testing | Annual third-party + continuous bug bounty |
+
+### 8.3 Regional compliance (call this out)
+
+| Region | Key compliance items |
+|---|---|
+| India | RBI tokenization mandate, RBI data-localization, NPCI rules, IT Act |
+| EU | PSD2 (SCA), GDPR, EBA RTS |
+| US | PCI-DSS, FFIEC, state-level (NYDFS), GLBA, CCPA |
+| Global | PCI-DSS, ISO 27001, SOC 2 Type II |
+
+### 8.4 Operational security
+
+- Production access via session-recorded bastion (Teleport, AWS Session Manager).
+- Change management: separation of duties (developer + reviewer + approver are distinct).
+- Encryption keys rotated annually; secrets rotated quarterly.
+- Disaster recovery drills quarterly; chaos engineering exercises monthly.
+
+---
+
+## SECTION 9 — RELIABILITY
+
+### 9.1 Availability targets
+
+| Path | SLO | Error budget |
+|---|---|---|
+| Accept (charge) | 99.99% | 4.4 min / month |
+| Payout / refund | 99.95% | 21.9 min / month |
+| Dashboard / reporting | 99.9% | 43.8 min / month |
+| Webhook delivery (success within 1h) | 99.5% | n/a |
+
+### 9.2 Multi-region topology
+
+- **Active-active** preferred for accept path (lower RTO).
+- **Active-passive** acceptable for back-office (settlement, recon).
+- **Region affinity** by merchant — merchant X always served from region A; failover to region B on disaster.
+- **Data replication** — Postgres logical replication or cross-region read replica; Kafka MirrorMaker; Redis Enterprise active-active (CRDTs) or per-region clusters.
+
+### 9.3 Failure scenarios and responses
+
+| Failure | Detection | Response |
+|---|---|---|
+| PSP outage | Circuit breaker opens (5 failures or SR < 95%) | Failover to next PSP; idempotency-keyed retry |
+| Postgres primary failure | Patroni / RDS Multi-AZ monitor | Auto-failover in 30-60 s |
+| Redis node failure | Sentinel / Cluster detection | Auto-failover in 10-30 s |
+| Kafka broker failure | Partition leader re-election | Producer retry; consumer rebalance |
+| Region outage | Route 53 health check + DNS failover | 60 s DNS shift; in-region failover within minutes |
+| Webhook consumer down | Kafka consumer lag alert | Replay on recovery; no lost events (outbox + Kafka durability) |
+| Settlement cron failure | Job runner alert | Re-run idempotently (UNIQUE on merchant+date prevents double pay) |
+
+### 9.4 Chaos engineering practices
+
+- Kill random pods (LitmusChaos).
+- Network latency injection (Toxiproxy, Chaos Mesh).
+- Block a PSP at the firewall to test routing failover.
+- DB failover drills (planned, monthly).
+- Region failover drills (planned, quarterly).
+
+---
+
+## SECTION 10 — OBSERVABILITY
+
+### 10.1 The three pillars
+
+- **Metrics** — Prometheus + Grafana. RED method (Rate, Errors, Duration) per service per route per PSP.
+- **Traces** — OpenTelemetry → Tempo / Jaeger / Datadog APM. Span every external call.
+- **Logs** — Structured JSON, OTel collector, ship to Loki / Datadog / Splunk. PII-masked at source.
+
+### 10.2 SLOs and burn-rate alerts
+
+| SLO | Target | Burn-rate alert |
+|---|---|---|
+| Accept-path availability | 99.99% | 14.4x burn over 1h → page |
+| Accept-path p99 latency | < 500 ms | 1h sustained breach → page |
+| Webhook delivery within 5 min | 99% | 4h sustained breach |
+| Settlement on-time | 99.5% | Any miss |
+| Recon auto-match rate | > 99.5% | 24h sustained < 99% |
+
+### 10.3 Dashboards
+
+- Per-service: RED + saturation.
+- Per-PSP: success rate, latency, circuit state.
+- Per-merchant (for top merchants): volume, error rate, dispute rate.
+- Money: ledger account balances vs expected; recon exception count.
+- Capacity: DB connections, Redis memory, Kafka consumer lag, K8s pod count.
+
+### 10.4 Alert tiers
+
+| Tier | Examples | Channel |
+|---|---|---|
+| P0 (page) | Accept path down; DB primary unreachable; money mismatch detected | PagerDuty + SMS + Slack |
+| P1 (on-call) | PSP circuit open > 5 min; settlement failure; webhook DLQ > 100 | Slack + email |
+| P2 (next biz day) | Cache hit rate degraded; p99 budget burn 5% | Email + Jira |
+
+---
+
+## SECTION 11 — CROSS-QUESTIONS WITH DETAILED ANSWERS
+
+### CQ1. "Walk me through a card payment end-to-end."
+
+*"Customer enters card → client SDK tokenizes via PSP → our API receives token + amount + merchant_id + idempotency key → auth, rate-limit, idempotency checks → orchestrator persists `INITIATED` + outbox event in one transaction → risk engine scores → smart router picks PSP → connector calls PSP (`charge` API with PSP idempotency token) → PSP authorizes; we transition to `AUTHORIZED` and post ledger entries (customer-card-receivable debit, suspense credit) → outbox event fires; webhook to merchant; client receives sync response. p99 < 500 ms."*
+
+### CQ2. "How do you ensure exactly-once or at-least-once semantics across the system?"
+
+We design for **at-least-once at the messaging layer + exactly-once at the effect layer via idempotency**. Concretely:
+
+- API: idempotency-key on every mutating request; same key → same response.
+- DB: state-machine guards + unique constraints prevent duplicate effects (e.g., capturing the same authorization twice).
+- Outbox: each event published at-least-once; consumers are idempotent.
+- PSP calls: each carries a PSP-side idempotency token; PSP dedups.
+- Ledger postings: unique idempotency key per posting; duplicate post → no-op.
+
+"Exactly-once" as a wire-level guarantee is largely a myth; we build **observable exactly-once outcomes** via idempotency everywhere.
+
+### CQ3. "Why a state machine for the txn lifecycle?"
+
+Three reasons:
+
+1. **Compile-time + runtime correctness.** Invalid transitions are rejected (you cannot `REFUND` a `FAILED` txn).
+2. **Auditability.** The history is an append-only log; auditors / regulators ask "show me the timeline of txn X" — one query.
+3. **Single mutation chokepoint.** All side-effects (events, ledger entries, webhooks) hang off the same `transition()` call, eliminating drift between "status changed in DB" and "downstream notified".
+
+### CQ4. "How do you handle a PSP outage mid-payment?"
+
+Three layers:
+
+1. **Detection** — Resilience4j circuit breaker per PSP-mode combo; opens after 5 consecutive failures or SR < 95% over last 100.
+2. **Failover** — smart router skips OPEN circuits; next-priority PSP picked. The retry uses the **same client idempotency key** so we don't double-charge; the connector generates a **new PSP-side idempotency token** scoped to that PSP.
+3. **Recovery** — half-open every 30 s; one probe; close on success.
+
+Edge case: PSP1 actually charged the card but timed out responding; we route to PSP2 which also charges. Reconciliation catches this (PSP1 file shows the txn we don't have in our books). Auto-refund triggered. **Rare; bounded; recoverable.**
+
+### CQ5. "How do you ensure no double-charge?"
+
+Four lines of defense:
+
+1. **Client-supplied idempotency key** at API boundary (Section 3.5).
+2. **PSP-side idempotency token** in every connector call.
+3. **State-machine guards** prevent re-execution of a completed state.
+4. **Daily reconciliation** as the final independent check; mismatches auto-refund.
+
+A single layer can fail; four layers in series virtually cannot.
+
+### CQ6. "PCI-DSS scope — what's in, what's out?"
+
+**In scope:** anything handling raw PAN, CVV, magnetic stripe, PIN block. In our design, this is **only** the tokenization-service.
+
+**Out of scope:** everything that handles tokens, last-4, expiry, brand.
+
+We never let PAN past the tokenization-service. The orchestrator, ledger, webhook delivery, settlement, recon, analytics — all out of PCI scope. **The audit surface is reduced from the entire platform to one service.**
+
+### CQ7. "How do you scale to 100K RPS?"
+
+Apply the scaling ladder (Section 7.1):
+
+1. Vertical first — biggest Postgres instance you can buy.
+2. Read replicas exhaustively — 80%+ of reads off primary.
+3. Aggressive caching — 95%+ hit rate on hot reads.
+4. Shard OLTP by `merchant_id` (Vitess / Citus).
+5. Kafka partition expansion + consumer parallelism.
+6. Split services by domain (txn, ledger, recon, webhook, settlement own their own DBs).
+7. Multi-region active-active with merchant affinity.
+8. Cell-based architecture — assign merchants to cells; each cell is independent.
+
+Avoid: rewriting Postgres → Cassandra. Wrong shape for OLTP money workloads.
+
+### CQ8. "Why Kafka, not RabbitMQ or SQS?"
+
+- **Replayability** — Kafka retains for days/weeks; RabbitMQ deletes on ack; SQS 14-day cap.
+- **Per-key ordering** — Kafka partitions; RabbitMQ FIFO queues exist but don't scale similarly.
+- **Throughput** — Kafka 100K+ msg/s per broker.
+- **Consumer groups** — first-class; RabbitMQ needs work.
+
+RabbitMQ wins for complex routing (topic exchanges) and per-message ack. Not our shape.
+
+### CQ9. "Why PostgreSQL / MySQL, not Cassandra or MongoDB?"
+
+Money workloads need ACID + joins + ad-hoc queries. Cassandra / MongoDB force denormalization per query pattern, punish ad-hoc reporting, and have weak transactional semantics across multiple keys. Postgres / MySQL with replicas + cache + ES for search + ClickHouse for OLAP beats NoSQL on this shape.
+
+### CQ10. "Idempotency key — request-scoped or attempt-scoped?"
+
+**Per-attempt** is the Stripe-recommended pattern. The client generates a new key per logical operation; retries of the same operation reuse the same key. This way:
+
+- Network retries of the same operation → same key → safe.
+- Two distinct purchases by the same customer at the same merchant → distinct keys → both processed.
+
+A common bug is to reuse the same key across distinct operations (e.g., one key per customer-session) — then the second purchase silently returns the first response.
+
+### CQ11. "How do you handle a refund when the PSP is down?"
+
+Refunds are inherently async (RBI / regulator allows 5-7 business days). Flow:
+
+1. Persist `REFUND_INITIATED`; ledger reserve (compensating entries); customer-message "5-7 days".
+2. PSP call inside circuit breaker.
+3. If PSP open → queue in `refund_retry` with `next_attempt_at = now + 1h`.
+4. Retry hourly for up to 72h.
+5. After 72h still open → P1 alert; manual fallback (NEFT/IMPS direct).
+6. On success: `REFUND_COMPLETED`; reverse the reserve entries.
+7. On hard fail: `REFUND_FAILED`; release the reserve; alert.
+
+Refund SLO is generous; correctness > speed.
+
+### CQ12. "Sharding strategy — pick a key and defend it."
+
+**Pick `merchant_id`.** Every authenticated call carries the merchant; per-merchant queries are common; cross-merchant queries are rare (ops only, can go to OLAP).
+
+**Not `txn_id`** — kills per-merchant dashboards (fanout to all shards).
+
+**Not `created_at`** — creates a permanent hot shard (current month gets all writes).
+
+**Hash-based or range-based?** Hash for even distribution; range only if temporal locality matters (rarely does for payments).
+
+**Resharding** — Vitess / Citus support online resharding. Plan for 4x current shard count to avoid frequent reshards.
+
+### CQ13. "How does the outbox pattern work, and why is it necessary?"
+
+**Necessary because** otherwise you have a dual-write between DB and Kafka. If DB commits and Kafka fails, downstream never knows. Reversed, you publish-then-commit, and the DB write fails, leaving a phantom event.
+
+**How:**
+1. In the same DB txn as the state change, insert a row into `outbox` with the event payload.
+2. A background worker (or Debezium CDC reading the WAL/binlog) reads outbox, publishes to Kafka, marks delivered.
+3. At-least-once to Kafka; consumers are idempotent.
+
+This is the most-tested industry pattern for "atomic state-change + event emission." Every senior interviewer expects it.
+
+### CQ14. "How do you implement a double-entry ledger? Why?"
+
+**Why:** payment systems must produce a balance sheet that always balances. Stored balances drift; derived balances from immutable postings cannot.
+
+**How:**
+
+- Two tables: `account`, `posting`.
+- Every business event produces one or more **journal entries** — sets of postings that net to zero.
+- Postings are append-only; corrections are reversing entries.
+- Balance = SUM(credits) - SUM(debits) for the account, optionally materialized for performance.
+
+**Worked example:** Capture ₹1000 with ₹20 fee:
+
+| Debit account | Credit account | Amount |
+|---|---|---|
+| Customer-card-receivable | Suspense | 1000 |
+| Suspense | Merchant-payable | 980 |
+| Suspense | Platform-fee | 20 |
+
+Sum of debits = sum of credits = 2000. Suspense nets to zero. Invariants verifiable any time.
+
+### CQ15. "How do you do reconciliation? Why is it needed if your DB is correct?"
+
+**Why:** truth lives in three places — our books, the PSP's books, the bank's books. The only way to *prove* they agree is to compare them.
+
+**How:** daily three-way match by `(psp_reference, amount, date)`:
+
+- MATCHED — archive.
+- PSP_ONLY — we missed a webhook; replay.
+- INTERNAL_ONLY — possible PSP failure post our state change; investigate.
+- BANK_ONLY — bank settled something neither side knows; investigate.
+
+Auto-resolve known patterns; manual queue for the rest. SLO: 99.5% auto-match rate. This is the system's **independent check** on its own correctness.
+
+### CQ16. "How do you handle webhook delivery failures?"
+
+- Outbox pattern persists the event atomically with the state change.
+- Delivery worker posts with HMAC signature + timestamp.
+- Schedule: 1m → 5m → 15m → 1h → 6h → 24h. Six attempts.
+- After max attempts → DLQ; ops replay tool.
+- Per-merchant isolation (one slow merchant doesn't block others).
+
+### CQ17. "Webhook signature — what algorithm and why?"
+
+**HMAC-SHA256** over `timestamp + ‘.’ + body`, with the merchant's shared secret. Merchant verifies on receipt.
+
+Why HMAC vs RSA: HMAC is sub-millisecond; key management is per-merchant shared secret; rotation is trivial. RSA is ~10x slower and requires public-key distribution.
+
+Timestamp + 5-min window prevents replay. Versioned signatures (`v1=...`) allow algorithm rotation.
+
+### CQ18. "How does 3DS 2.0 differ from 3DS 1.0?"
+
+| | 3DS 1.0 | 3DS 2.0 |
+|---|---|---|
+| Friction | Always OTP redirect | Frictionless for ~80% (issuer scores risk silently) |
+| Mobile | Bad UX, redirect | Native SDK, no redirect |
+| Data | Limited | 150+ data points sent to issuer |
+| Drop-off | ~30% | ~5% |
+| Mandate | Optional | Mandated in many regions (PSD2 SCA, RBI for cross-border) |
+| Liability | Shifts to issuer when challenged | Shifts on frictionless and challenged |
+
+### CQ19. "What's tokenization and why did the RBI 2022 mandate change everything?"
+
+**Tokenization** = replacing PAN with a network-issued token unique to (PAN, merchant). PSP / network mints; we store the token + last-4 + expiry + brand.
+
+**RBI 2022 mandate** (Sep 30, 2022): merchants and aggregators in India can no longer store Card-on-File (CoF) data. Network tokens must replace stored PANs. Acquirers / PSPs implement CoFT (Card-on-File Tokenization) via VTS / MDES.
+
+**What we gain:** PCI scope shrinks dramatically; PAN compromise at one merchant doesn't cascade.
+
+**What we lose:** tokens are PSP-bound. Switching PSPs means re-tokenizing customers.
+
+### CQ20. "How would you implement a rate limiter at this scale?"
+
+**Token bucket via Redis Lua** for sub-ms atomic CAS:
 
 ```lua
--- Atomic token bucket. Args: key, capacity, refill_rate, now_ms, tokens_requested
+-- KEYS[1] = bucket key
+-- ARGV[1] = capacity, ARGV[2] = refill rate/sec, ARGV[3] = now_ms, ARGV[4] = tokens requested
 local bucket = redis.call('HMGET', KEYS[1], 'tokens', 'last_refill')
-local tokens = tonumber(bucket[1]) or tonumber(ARGV[1])  -- start full
+local tokens = tonumber(bucket[1]) or tonumber(ARGV[1])
 local last = tonumber(bucket[2]) or tonumber(ARGV[3])
 local elapsed = math.max(0, tonumber(ARGV[3]) - last)
 tokens = math.min(tonumber(ARGV[1]), tokens + elapsed * tonumber(ARGV[2]) / 1000)
@@ -208,1189 +1264,159 @@ else
 end
 ```
 
-**Limits per merchant tier:**
+Per-merchant + per-route keys. Tiered limits. Two limits enforced (per-second burst + per-day quota). Headers (`X-RateLimit-Remaining`, `Retry-After`) communicate quotas to clients.
 
-| Tier | RPS limit | Daily limit |
+### CQ21. "Multi-region active-active vs active-passive?"
+
+| | Active-Active | Active-Passive |
 |---|---|---|
-| Free | 10 RPS | 10K req/day |
-| Standard | 100 RPS | 1M req/day |
-| Enterprise | 500 RPS | unlimited |
-| Whitelisted (banks, large telcos) | custom | custom |
+| Latency | Each region serves local traffic | Failover region cold |
+| RTO | Seconds (DNS shift) | Minutes (warm-up) |
+| Complexity | High (conflict resolution, replication topology) | Lower |
+| Cost | 2x compute | 1.2x compute |
+| Data | Eventually consistent across regions; merchant pinning helps | Replicated; failover promotes |
 
-**Anchor:** Redisson `RRateLimiter` does this out of the box. We use the Lua approach when we need custom per-merchant-per-mode limits (UPI vs Cards have different bank-side rate ceilings).
+**Pick active-active for accept path** (latency + RTO). **Active-passive acceptable for back-office** (settlement, recon, dashboard).
 
-### 3.5 Idempotency layer
+**Conflict resolution** — pin each merchant to a primary region. Failover region serves writes only during disaster; conflict window is tiny.
 
-**The single most important pattern in any payment system.** Caller sends `Idempotency-Key` header on every mutating request; server caches the response keyed by `(merchant_id, idempotency_key)` for 24h.
-
-```java
-@PostMapping("/v1/payments")
-public ResponseEntity<PaymentResponse> create(
-        @RequestHeader("Idempotency-Key") String idemKey,
-        @RequestHeader("X-Merchant-Id") String merchantId,
-        @RequestBody PaymentRequest req) {
-
-    String cacheKey = "idem:" + merchantId + ":" + idemKey;
-
-    // 1. Fast path: cached response
-    PaymentResponse cached = redis.opsForValue().get(cacheKey);
-    if (cached != null) return ResponseEntity.ok(cached);
-
-    // 2. Distributed lock to prevent concurrent first-runs of same key
-    RLock lock = redisson.getLock("lock:" + cacheKey);
-    if (!lock.tryLock(2, 30, TimeUnit.SECONDS)) {
-        throw new TooManyRequestsException();
-    }
-    try {
-        // Re-check inside lock (someone may have completed while we waited)
-        cached = redis.opsForValue().get(cacheKey);
-        if (cached != null) return ResponseEntity.ok(cached);
-
-        // 3. DB unique constraint as final safety net
-        try {
-            paymentRepo.save(new Payment(idemKey, merchantId, req));
-        } catch (DataIntegrityViolationException dup) {
-            // Concurrent insert won; load and return existing
-            return ResponseEntity.ok(loadByIdemKey(merchantId, idemKey));
-        }
-
-        // 4. Process + cache result
-        PaymentResponse resp = process(req);
-        redis.opsForValue().set(cacheKey, resp, Duration.ofHours(24));
-        return ResponseEntity.ok(resp);
-    } finally {
-        if (lock.isHeldByCurrentThread()) lock.unlock();
-    }
-}
-```
-
-**Three layers of dedup:**
-1. **Redis cached response** (fast path, sub-ms).
-2. **Redisson `RLock`** (serializes concurrent first-runs).
-3. **DB unique constraint on `(merchant_id, idem_key)`** (correctness fallback if Redis is down).
-
-**Anchor:** same three-layer pattern as `ANachLogsEntity` + Redisson `RLock` + state-machine guard in the Digio NACH webhook flow (STAR 2 + file 18 Section 5.3).
-
-### 3.6 Txn orchestrator + state machine
-
-**The mutation chokepoint.** Every txn state transition goes through one method (`insertTxnTracker` in our hypothetical service), modeled on the `insertApplicationTracker` pattern from `ApplicationStatusServiceImpl` (file 05).
-
-**Txn state diagram:**
-
-```mermaid
-stateDiagram-v2
-    [*] --> CREATED
-    CREATED --> AUTHORIZED: PSP returns success
-    CREATED --> FAILED: PSP returns failure / timeout
-    AUTHORIZED --> CAPTURED: capture API or auto-capture
-    AUTHORIZED --> VOIDED: void before capture
-    CAPTURED --> SETTLED: T+1 settlement batch
-    CAPTURED --> REFUND_INITIATED: refund API
-    REFUND_INITIATED --> REFUNDED: PSP confirms refund
-    REFUND_INITIATED --> REFUND_FAILED: PSP rejects
-    SETTLED --> DISPUTED: chargeback received
-    DISPUTED --> DISPUTE_WON: dispute resolved in our favor
-    DISPUTED --> DISPUTE_LOST: chargeback upheld
-    FAILED --> [*]
-    REFUNDED --> [*]
-    VOIDED --> [*]
-    DISPUTE_WON --> [*]
-    DISPUTE_LOST --> [*]
-```
-
-**Why pragmatic enum + audit table, not Spring State Machine (STAR 4):**
-- Per-PSP differences in trigger events (UPI emits collect-link-sent; cards don't).
-- Need to query "show me all txns currently in `AUTHORIZED` for merchant X" — `WHERE current_status = 'AUTHORIZED'` on the audit table is trivial.
-- Compliance auditor expects one immutable timeline per txn — `TXN_STAGE_TRACKER` table delivers it.
-- No framework lock-in; pure Java enums + JPA.
-
-**LLD — the `insertTxnTracker` flow:**
-
-```java
-@Transactional
-public void insertTxnTracker(String txnId, TxnStage newStage, String type, Long typeId) {
-    // 1. Mark current active row as inactive
-    txnTrackerRepo.deactivatePrevious(txnId);
-    // 2. Find prev stage (for trigger context)
-    TxnStage prev = txnTrackerRepo.findCurrent(txnId).map(TxnTracker::getStage).orElse(null);
-    // 3. Deactivate mutually exclusive stages (e.g. REFUND_INITIATED deactivates CAPTURED)
-    deactivateDependentStages(txnId, newStage);
-    // 4. Save new stage
-    TxnTracker tracker = new TxnTracker(txnId, prev, newStage, type, typeId, /*isActive*/ true);
-    txnTrackerRepo.save(tracker);
-    // 5. Fire triggers (Kafka events) for downstream consumers
-    triggerService.process(prev, newStage, txnId, type, typeId);
-    // 6. Update admin / notification status
-    updateMerchantStatus(txnId, newStage);
-}
-```
-
-**Single mutation primitive.** All other code paths call `insertTxnTracker`. No direct UPDATE on `txn.current_status` from anywhere else. **Audit, idempotency, and trigger dispatch all happen in one place** — same chokepoint discipline as `dgl-status`.
-
-### 3.7 PSP Routing layer
-
-**Responsibilities:** given `(payment_mode, merchant, currency, country)`, pick which PSP to call.
-
-**Pattern:** Factory + priority list, **exact same pattern as `AutoDisbursalFactory`** (file 18 Section 5; v2 behavioral pack Q12).
-
-```java
-public interface PspHandler {
-    PaymentMode getMode();
-    String getPspName();
-    boolean canHandle(PaymentRequest req);
-    PaymentResponse charge(PaymentRequest req);
-    PaymentResponse refund(RefundRequest req);
-    int getPriority();   // lower = preferred
-    HealthStatus getHealth();  // CLOSED, HALF_OPEN, OPEN (circuit breaker state)
-}
-
-@Component
-public class PspRouter {
-    private final Map<PaymentMode, List<PspHandler>> handlers;
-
-    public PspRouter(List<PspHandler> all) {
-        // Spring auto-discovery, same as AutoDisbursalFactory
-        this.handlers = all.stream()
-            .collect(Collectors.groupingBy(PspHandler::getMode));
-    }
-
-    public PspHandler route(PaymentRequest req) {
-        return handlers.get(req.getMode()).stream()
-            .filter(h -> h.canHandle(req))
-            .filter(h -> h.getHealth() != HealthStatus.OPEN)
-            .min(Comparator.comparingInt(PspHandler::getPriority))
-            .orElseThrow(() -> new NoPspAvailableException(req.getMode()));
-    }
-}
-```
-
-**Routing inputs (the "smart router" picks based on these):**
-
-| Input | Why it matters |
-|---|---|
-| Payment mode | Cards-only PSPs (Stripe) can't do UPI |
-| Merchant config | Some merchants on-board to specific PSPs only |
-| Currency / country | International cards may need a different PSP |
-| Recent success rate (last 5 min) | Real-time health, prefer high SR |
-| Cost (MDR) | Cheaper PSP wins all else equal |
-| Volume tier | High-volume merchants get the lowest-cost PSP |
-
-**Circuit breaker per PSP:** Resilience4j. **Open after 5 consecutive failures or success rate < 95% over last 100 requests; half-open every 30s** with one probe. Failover happens automatically — when Razorpay's circuit opens, traffic shifts to Cashfree, then Juspay.
-
-**Bulkhead per PSP:** dedicated thread pool of 50 connections so a slow PSP doesn't starve the others.
-
-### 3.8 Mode handlers (one sub-section per mode)
-
-#### 3.8.1 UPI handler
-
-**Flows:**
-- **Collect intent** — merchant generates collect request; customer pays from UPI app; PSP fires webhook on success.
-- **Push** — merchant pushes payment to customer UPI; customer approves in app.
-- **QR** — static / dynamic QR; customer scans + pays.
-- **AutoPay** — recurring mandate (loan EMI, subscription); RBI-mandated 24h notification before charge.
-
-**Latency profile:** customer-action gated, so async at the app level — but the PSP API call itself returns in <500 ms.
-
-**Edge cases:**
-- **Bank downtime** — NPCI rotates banks; PSP handles retry but sometimes returns `TXN_INITIATED` and the actual settlement is unclear for hours. **Always poll status if no webhook within 2 minutes.**
-- **Duplicate UPI ID submission** — same customer hits collect twice from two devices. **Idempotency key handles this.**
-
-#### 3.8.2 Cards handler
-
-**Flows:**
-- **Auth + capture** — debit/credit card with 3DS 2.0 challenge if risk-flagged.
-- **Auth-only + later capture** — for travel/hotel where final amount is known later.
-- **Tokenized cards** — post-RBI mandate Sep 2022, **no merchant stores raw PAN.** Network tokens (Visa Token Service, MasterCard Digital Enablement) or issuer tokens.
-
-**3DS 2.0** — frictionless flow (issuer assesses risk silently) for ~80% of txns; challenge flow (OTP / biometric) for the rest.
-
-**LLD critical:** the PAN never enters our system. **PCI-DSS Level 1 scope reduction** — we receive a network token from the PSP / network on first save, store the token + last-4 + expiry only.
-
-#### 3.8.3 Netbanking handler
-
-**Flow:** merchant initiates → our gateway constructs bank-specific redirect URL → customer redirects to bank login → bank confirms → callback to our gateway → we update txn state.
-
-**The ugly truth about netbanking:**
-- ~50 banks each with their own API quirks.
-- ~5% of banks have unreliable webhooks — **always poll status on a 30s interval until terminal.**
-- Some banks return the redirect HTML inline, others as a form POST — abstraction layer in the handler matters.
-
-**LLD:** keep per-bank config in `psp_bank_config` table (endpoint, callback URL, signing key, polling URL). **Hot reload via ConfigNexus pattern** so no deploy needed when a bank changes its endpoint.
-
-#### 3.8.4 Wallet handler
-
-**Flow:** redirect-then-callback similar to netbanking, but auth is wallet-native (PIN, biometric). Some wallets (Paytm) support direct token exchange — no redirect.
-
-**Latency profile:** customer-gated; same handling as UPI.
-
-#### 3.8.5 EMI handler
-
-**Three flavors:**
-1. **Bank EMI** — card auth for full amount, bank converts to EMI on settlement.
-2. **No-cost EMI** — merchant subvents the interest; full amount auth, merchant pays interest portion to bank.
-3. **Cardless EMI** — NBFC underwrites the customer at checkout time; **becomes a loan, not a payment** — different flow.
-
-**Anchor:** the cardless EMI flow is essentially what your PayU lending stack does — application → KYC → mandate → disbursal.
-
-#### 3.8.6 B2B transfer handler
-
-**Modes:**
-
-| Rail | When | Limit | Cost | Settlement |
-|---|---|---|---|---|
-| **IMPS** | Real-time, 24×7 | ≤ ₹5L | ₹2-5 / txn | Instant |
-| **NEFT** | Batched, half-hourly | No upper limit | ₹1-2 / txn | Same day |
-| **RTGS** | Real-time, business hours | ≥ ₹2L | ₹15-50 / txn | Instant |
-| **UPI** | Real-time, 24×7 | ≤ ₹1L (per txn) | Free | Instant |
-
-**Beneficiary verification (Penny Drop):** before first payout to a new account, send ₹1 verify it lands, fetch the registered name from the bank response, match against merchant-provided name. **Critical for fraud prevention.**
-
-**Why we hold funds in a single account:** simplifies recon; cheaper than per-merchant nodal accounts; RBI nodal account rules require strict ledgering (we can never co-mingle).
-
-### 3.9 Settlement service
-
-**Default T+1:** all captured txns of day D get aggregated, MDR + GST deducted, net amount paid to merchant on day D+1 morning.
-
-**T+0 express:** premium feature; net amount paid same day after cutoff.
-
-**Cycle:**
-
-```
-06:00 IST — read all txns captured between yesterday 06:00 and today 06:00
-06:05 IST — group by merchant, compute gross + MDR + GST + net
-06:15 IST — generate per-merchant settlement entries in DB (`settlement_batch` + `settlement_item`)
-06:30 IST — initiate B2B transfer (NEFT batch / IMPS) to each merchant's bank account
-07:00 IST — webhook to merchant: "Settlement X paid, see report"
-07:30 IST — generate settlement report PDF, upload to merchant dashboard
-```
-
-**Schema:**
-
-```sql
-CREATE TABLE settlement_batch (
-    batch_id        VARCHAR(36) PRIMARY KEY,
-    merchant_id     VARCHAR(36) NOT NULL,
-    settlement_date DATE NOT NULL,
-    gross_amount    BIGINT NOT NULL,
-    mdr_amount      BIGINT NOT NULL,
-    gst_amount      BIGINT NOT NULL,
-    net_amount      BIGINT NOT NULL,
-    status          ENUM('PENDING','IN_PROGRESS','COMPLETED','FAILED'),
-    bank_utr        VARCHAR(64),
-    INDEX idx_merchant_date (merchant_id, settlement_date),
-    UNIQUE KEY uk_merchant_date (merchant_id, settlement_date)
-);
-```
-
-**Unique constraint on `(merchant_id, settlement_date)`** = at-most-one settlement per day per merchant. **Idempotency by DB invariant.**
-
-### 3.10 Webhook delivery service
-
-**The most important async component.**
-
-**Always-200-to-source-on-intake** is for receiving webhooks from PSPs (STAR 2). When **we send webhooks to merchants**, we expect them to follow the same discipline — so we **retry hard**.
-
-**Retry schedule:** 1m → 5m → 15m → 1h → 6h → 24h → DLQ. **6 attempts; 31h total window.**
-
-**Implementation:**
-
-```java
-@Service
-public class WebhookDeliveryService {
-    private final KafkaTemplate<String, WebhookEvent> kafka;
-    private final WebhookDeliveryRepository repo;
-
-    @KafkaListener(topics = "txn-events")
-    public void onTxnEvent(TxnEvent event) {
-        // Project txn event into webhook delivery row
-        WebhookDelivery delivery = new WebhookDelivery(
-            UUID.randomUUID().toString(),
-            event.getMerchantId(),
-            event.getTxnId(),
-            event.getStage(),
-            buildPayload(event),
-            DeliveryStatus.PENDING,
-            0,
-            Instant.now()
-        );
-        repo.save(delivery);
-        // Fire to async delivery executor
-        deliveryExecutor.submit(() -> attempt(delivery));
-    }
-
-    private void attempt(WebhookDelivery d) {
-        String signature = "HMAC-SHA256=" + hmacSha256(d.getPayload(), merchantSecret(d.getMerchantId()));
-        HttpResponse<String> resp = httpClient.send(
-            HttpRequest.newBuilder()
-                .uri(merchantWebhookUrl(d.getMerchantId()))
-                .header("Content-Type", "application/json")
-                .header("X-Signature", signature)
-                .header("X-Event-Id", d.getId())
-                .header("X-Timestamp", Long.toString(Instant.now().getEpochSecond()))
-                .POST(BodyPublishers.ofString(d.getPayload()))
-                .timeout(Duration.ofSeconds(10))
-                .build(),
-            BodyHandlers.ofString()
-        );
-
-        if (resp.statusCode() == 200) {
-            d.setStatus(DeliveryStatus.DELIVERED);
-            d.setDeliveredAt(Instant.now());
-        } else {
-            d.setAttempts(d.getAttempts() + 1);
-            if (d.getAttempts() >= 6) {
-                d.setStatus(DeliveryStatus.FAILED);
-                deadLetterQueue.add(d);
-                alerting.notify("webhook-delivery-permanent-failure", d);
-            } else {
-                d.setNextAttemptAt(Instant.now().plus(BACKOFF_SCHEDULE[d.getAttempts()]));
-                d.setStatus(DeliveryStatus.RETRYING);
-            }
-        }
-        repo.save(d);
-    }
-}
-```
-
-**HMAC signing:** the merchant verifies our signature with their secret. Prevents tampering, prevents replay (combined with `X-Timestamp` + 5-min window).
-
-**DLQ:** dead-letter queue is a Kafka topic with infinite retention. Manual ops replay tooling reads from DLQ when a merchant says "we missed webhooks for the past 6 hours."
-
-### 3.11 Refund + dispute service
-
-**Refunds:** orchestration-style saga.
+### CQ22. "How do you handle a chargeback?"
 
 ```mermaid
 sequenceDiagram
-    participant Merchant
-    participant Orchestrator
-    participant DB
+    participant Issuer
+    participant Network
     participant PSP
-    participant Kafka
+    participant Us
+    participant Merchant
 
-    Merchant->>Orchestrator: POST /v1/refunds (txn_id, amount, idem_key)
-    Orchestrator->>DB: Find txn by txn_id (lock row FOR UPDATE)
-    DB-->>Orchestrator: txn (status=CAPTURED, refundable_amount=X)
-    Orchestrator->>DB: insert refund row (status=INITIATED), insertTxnTracker(REFUND_INITIATED)
-    Orchestrator->>PSP: refund API call (idempotency-keyed)
-    PSP-->>Orchestrator: success / async-ack
-    Orchestrator->>DB: insertTxnTracker(REFUNDED) on async webhook OR REFUND_FAILED
-    Orchestrator->>Kafka: emit refund-event
-    Kafka->>Merchant: webhook (via WebhookDeliveryService)
+    Issuer->>Network: Chargeback raised
+    Network->>PSP: Notification
+    PSP->>Us: Webhook (dispute event)
+    Us->>Merchant: Webhook (alert)
+    Us->>Us: Debit merchant payable; credit dispute holding
+    Merchant->>Us: Submit evidence (within deadline, e.g. 7 days)
+    Us->>PSP: Forward evidence
+    PSP->>Network: Representment
+    Network->>Issuer: Re-evaluate
+    Issuer-->>Network: Win or lose
+    Network-->>PSP: Outcome
+    PSP-->>Us: Final webhook
+    Us->>Us: Final ledger entries (refund holding, or post to loss)
+    Us->>Merchant: Webhook outcome
 ```
 
-**Compensating action** (when PSP refund fails after our DB shows `INITIATED`):
-- Move refund to `FAILED` after 3 PSP retries.
-- Alert ops to manual investigation.
-- Customer notification: "Refund will be processed within 7 business days" (RBI guideline).
+Chargeback rate is monitored per merchant; thresholds (Visa 1%, MC 1.5%) trigger fee penalties.
 
-**Disputes / chargebacks:** asynchronous lifecycle that can span weeks.
+### CQ23. "How do you do canary releases for a payment service?"
 
-| Stage | Trigger | Action |
-|---|---|---|
-| Retrieval request | Issuer requests txn details | Auto-respond with receipt + proof |
-| Chargeback initiated | Customer disputes via issuer | Reverse settled amount from merchant balance |
-| Pre-arbitration | Merchant submits evidence | Forward to PSP |
-| Arbitration | Network decides | Final amount disposition |
-| Outcome | Won / lost | Settle correspondingly |
+- **Internal traffic** (synthetic test merchants) — 100% of canary capacity for 10 min.
+- **Per-merchant pin** — small low-risk merchants routed to canary for 1 hour.
+- **Percentage rollout** — 5% → 25% → 50% → 100% over 4 hours.
+- **Guardrails** — auto-rollback on p99 latency increase > 20%, error rate > baseline + 0.5%, PSP success-rate drop > 1%.
+- **Tooling** — Argo Rollouts; metrics from Prometheus / Datadog.
 
-### 3.12 Reconciliation service
+Never instant 100%. Money-moving systems prefer slow rollouts.
 
-**Daily file from each PSP** — usually CSV / JSON via SFTP. **Anchor:** the GPay recon SFTP path (`GpayServiceImpl.uploadReconFileToSftpServer`, STAR 6).
+### CQ24. "How do you handle a customer who claims they were charged but the merchant says no?"
 
-**Recon engine:**
+The reconciliation engine answers this in seconds. We query:
+- Our `txn` table by `customer_ref` + amount + date.
+- The matching ledger postings.
+- The PSP-side recon file row.
+- The bank-side settlement file row.
 
-```
-1. Pull file from PSP SFTP (or PSP pushes to ours).
-2. Parse rows into staging table (`recon_psp_rows`).
-3. Join with our internal txn table by (psp_txn_id, amount, date).
-4. Three buckets:
-   - MATCHED — same on both sides, no action.
-   - PSP_ONLY — PSP has it, we don't. Investigate (missed webhook? lost record?).
-   - INTERNAL_ONLY — we have it, PSP doesn't. Investigate (failed at PSP after our state moved? out-of-cycle?).
-5. Exceptions go to ops queue (Slack alert + dashboard).
-6. Auto-resolve known patterns (timezone offsets, fee adjustments) via configurable rules.
-```
+If all four agree on "captured": the merchant order system has a bug. We share the txn proof.
+If we have it but the bank doesn't: stuck at PSP; we initiate auto-refund.
+If bank has it but we don't: investigate (should be very rare; recon-flagged).
 
-**Bouncy Castle anchor (STAR 6):** the SFTP upload path uses Bouncy Castle for OpenSSHv1 key parsing — `SftpClient.registerBouncyCastleProvider()` with static-block registration + `MessageDigest.getInstance("MD5", "BC")` verification + re-register fallback. **All crypto code paths in this design follow that pattern.**
+The triple-source-of-truth is exactly designed to resolve this without ambiguity.
 
-### 3.13 Reporting / analytics
+### CQ25. "How would you build a split-payment / marketplace flow?"
 
-**Hot path:** OLAP store (ClickHouse) populated via Debezium CDC from MySQL → Kafka → ClickHouse sink. **Avoid dual-writes** (file 17 CQ10).
+**One inbound charge, multiple settlement entries.** Customer pays X to a marketplace; settlement-time, the amount splits per merchant config (e.g., 80% to seller, 15% to platform, 5% to courier).
 
-**Merchant dashboard:** reads from ClickHouse for analytics ("last 30 days revenue by mode"), reads from ES for txn search ("find txns from this customer last week").
+- Inbound charge is **single** at the PSP. Single PSP risk is bounded.
+- The split happens at the **ledger + settlement layer** atomically. Sum of splits must equal the captured amount minus fees.
+- Beneficiary verification (penny-drop) for each split target before first payout.
+- Recon checks `SUM(split.amount) == txn.amount` per source.
 
-**BI / risk:** internal team queries ClickHouse directly via Metabase / Superset.
-
-**Anchor:** read-write split pattern (STAR 7) lets ops run heavy queries against the analytics layer without touching the OLTP master.
-
----
-
-## SECTION 4 — DATA MODEL + SHARDING
-
-### 4.1 Core tables
-
-```sql
--- The main txn table
-CREATE TABLE txn (
-    txn_id          VARCHAR(36) PRIMARY KEY,        -- UUID
-    merchant_id     VARCHAR(36) NOT NULL,           -- shard key
-    amount          BIGINT NOT NULL,                -- paise
-    currency        CHAR(3) NOT NULL,
-    payment_mode    VARCHAR(20) NOT NULL,           -- UPI/CARD/NB/...
-    psp_name        VARCHAR(50),                    -- which PSP we routed to
-    psp_txn_id      VARCHAR(100),                   -- PSP's reference
-    current_stage   VARCHAR(30) NOT NULL,
-    customer_ref    VARCHAR(36),                    -- masked customer identifier
-    metadata        JSON,
-    created_at      TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at      TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    INDEX idx_merchant_created (merchant_id, created_at),
-    INDEX idx_psp_txn (psp_name, psp_txn_id),
-    INDEX idx_stage (current_stage, created_at)
-);
-
--- The audit/event log (one row per state transition)
-CREATE TABLE txn_event (
-    event_id        BIGINT AUTO_INCREMENT PRIMARY KEY,
-    txn_id          VARCHAR(36) NOT NULL,
-    prev_stage      VARCHAR(30),
-    new_stage       VARCHAR(30) NOT NULL,
-    type            VARCHAR(30) NOT NULL,           -- 'CALLBACK', 'API', 'CRON'
-    type_id         VARCHAR(100),
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-    metadata        JSON,
-    created_at      TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
-    INDEX idx_txn_stage (txn_id, new_stage),
-    INDEX idx_txn_active (txn_id, is_active)
-);
-
--- Idempotency / dedup
-CREATE TABLE idempotency_key (
-    merchant_id     VARCHAR(36) NOT NULL,
-    idempotency_key VARCHAR(128) NOT NULL,
-    txn_id          VARCHAR(36) NOT NULL,
-    response_body   JSON,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (merchant_id, idempotency_key)
-);
-
--- Webhook outbox
-CREATE TABLE webhook_delivery (
-    delivery_id     VARCHAR(36) PRIMARY KEY,
-    merchant_id     VARCHAR(36) NOT NULL,
-    txn_id          VARCHAR(36) NOT NULL,
-    event_type      VARCHAR(50) NOT NULL,
-    payload         JSON NOT NULL,
-    status          ENUM('PENDING','RETRYING','DELIVERED','FAILED') NOT NULL,
-    attempts        INT NOT NULL DEFAULT 0,
-    next_attempt_at TIMESTAMP,
-    delivered_at    TIMESTAMP NULL,
-    INDEX idx_status_next (status, next_attempt_at)
-);
-```
-
-### 4.2 Sharding strategy
-
-**Pre-sharded:** when total OLTP volume < 500 GB and write RPS < 5K, **don't shard.** Master + 2 replicas + AOP routing (STAR 7) is enough.
-
-**Sharded:** beyond that, **shard by `merchant_id`** (hash) — same merchant always lands on the same shard, enabling per-merchant joins without cross-shard pain.
-
-**Why merchant_id:** every authenticated API call has the merchant in the URL or header. Routing is trivial. Cross-merchant queries are rare (only ops/recon).
-
-**Why not by `txn_id` hash:** would force every per-merchant report to fan out across all shards.
-
-**Vitess** for transparent sharding when we get there. Until then, app-level routing via a `ShardResolver` bean.
-
-### 4.3 Sharding the audit log
-
-`txn_event` is append-only and high write. **Partition by `created_at` month** (PARTITION BY RANGE) so old partitions can be archived to S3 + dropped cheaply.
-
----
-
-## SECTION 5 — MIDDLEWARE CHOICES (the "which and why" section)
-
-### 5.1 The full picks table
-
-| Concern | Pick | Why this, not the alternative |
-|---|---|---|
-| **OLTP store** | MySQL 8 master + 2 replicas, Vitess at scale | Mature India fintech tooling (ProxySQL, orchestrator), strong ecosystem, AOP routing already proven in lending stack. PostgreSQL fine alternative but team familiarity wins. |
-| **Event spine** | **Apache Kafka** (RF=3, min.insync.replicas=2, acks=all) | Durable replayable log; partitions for ordered per-key streams; Pulsar is technically nicer but ops overhead is higher. RabbitMQ not replayable. |
-| **Cache + locks + rate limit** | **Redis Cluster + Redisson** | Sub-ms p99; rich data structures (sorted sets, HyperLogLog); Redisson gives `RLock`, `RRateLimiter`, `RBucket` out of the box. Memcached too thin (no locks, no sorted sets). Cross-ref file 20 for deep dive. |
-| **Search** | **Elasticsearch** (via Debezium CDC from MySQL) | Faceted txn search, full-text, fast aggregations. Never source of truth (file 17). |
-| **OLAP / BI** | **ClickHouse** (cheaper) or **Snowflake** (managed) | Columnar scan + aggregate, 100x faster than running these queries on OLTP master. |
-| **Object storage** | **S3** (versioned, immutable) | Recon files, signed agreements, archive. PCI-friendly. |
-| **Secrets** | **HashiCorp Vault** + **AWS KMS** | KMS-rooted with Vault for dynamic creds; rotation built-in; PCI-DSS scope reduction. |
-| **HSM** | **AWS CloudHSM** or **Thales nShield** | For card-data crypto (PIN block, CVV verify). RBI-recommended. |
-| **API gateway** | **Kong** (open-core) or **Spring Cloud Gateway** | Auth + rate-limit + routing in one place. AWS API Gateway has cold-start tax + vendor lock. |
-| **Service mesh** (optional) | **Istio** | mTLS between services, traffic shifting for canary, distributed tracing. Skip if team can't operate it; YAGNI for early stage. |
-| **Circuit breaker** | **Resilience4j** | Per-PSP isolation; lightweight; Hystrix is EOL. |
-| **Distributed tracing** | **OpenTelemetry → Coralogix** | Anchor: existing Coralogix MCP investment. Standard OTel SDKs, vendor-neutral. |
-| **Container orchestration** | **Kubernetes** (EKS / GKE) | Industry standard; ECS as cheaper alternative. |
-| **CDC** | **Debezium → Kafka** | Avoids dual-writes (file 17 CQ10). Reliable binlog-based projection. |
-| **Schema migrations** | **Liquibase** or **Flyway** + **gh-ost** for online DDL | PCI-grade audit trail; gh-ost prevents replication lag during large table changes. |
-| **Feature flags / config** | **ConfigNexus** (your own — STAR 5) or LaunchDarkly | GitLab-MR-style governance for config changes; separation of duties. |
-| **CI/CD** | **GitLab CI + ArgoCD** (GitOps) | Already in your stack; ArgoCD's drift detection valuable for compliance. |
-
-### 5.2 Why Kafka, not RabbitMQ or SQS
-
-| | Kafka | RabbitMQ | SQS |
-|---|---|---|---|
-| Retention | Days/weeks (replayable) | Until consumed | 14 days max |
-| Ordering | Per-partition | Per-queue (FIFO) | FIFO queues only |
-| Throughput | 100K+ msg/s/broker | ~50K msg/s | Limited |
-| Replay | Yes (offset-based) | No | No |
-| Operational complexity | High | Medium | Zero (managed) |
-| Pull vs push | Pull (consumer-driven) | Push | Pull |
-
-**Verdict:** Kafka for the event spine. Replayability is non-negotiable in payments — when a webhook delivery service comes back from a 4-hour outage, it consumes from where it left off.
-
-### 5.3 Why MySQL, not Cassandra
-
-Same arguments as file 17. **Money-moving workload = OLTP relational = MySQL.** Cassandra wins for click streams, CDR ingestion (Airtel), IoT telemetry — *not* for orders/txns where joins matter and consistency is strict.
-
----
-
-## SECTION 6 — CRITICAL PATTERNS (cross-cutting)
-
-| Pattern | Where used | Anchor |
-|---|---|---|
-| **Idempotency** | Every mutating endpoint | Section 3.5, STAR 2 |
-| **State machine** | Txn lifecycle | Section 3.6, STAR 4, file 05 |
-| **Webhook intake: always-200 + persist + async** | When PSPs call us | STAR 2 (Digio NACH) |
-| **Webhook delivery: backoff + DLQ + HMAC** | When we call merchants | Section 3.10 |
-| **Distributed locking** | Per-txn serialization across pods | Redisson `RLock`, file 18 Section 5.3 |
-| **Saga (orchestration)** | Refund, dispute | Section 3.11 |
-| **Circuit breaker** | Per PSP | Resilience4j, Section 3.7 |
-| **Bulkhead** | Per-PSP thread pools | Section 3.7 |
-| **Outbox pattern** | Any cross-system event emission | File 17 CQ10 |
-| **CQRS** | Write to MySQL, read txn search from ES | Section 3.13 |
-| **CDC** | MySQL binlog → Debezium → Kafka → ES/CH | Section 5.1 |
-
----
-
-## SECTION 7 — SCALE & PERFORMANCE
-
-### 7.1 Per-component capacity at 2000 RPS peak
-
-| Component | Pods needed | Per-pod throughput | Bottleneck |
-|---|---|---|---|
-| Edge / LB | 2 (HA) | 10K+ RPS each | Bandwidth |
-| API Gateway | 4 | ~1K RPS | CPU (auth + rate limit) |
-| Auth service | 4 | ~2K RPS | Redis lookup for API key |
-| Orchestrator | 8 | ~500 RPS (DB-bound) | MySQL write |
-| PSP handlers | 4-8 per mode | ~500 RPS | PSP API latency |
-| Webhook delivery | 4 (async) | N/A | Outbound HTTP |
-| Settlement | 1 (cron) | N/A | Batch window |
-
-**Compute headroom:** scale to 3x peak (6000 RPS) before hitting the next architectural change.
-
-### 7.2 Read scaling
-
-- **80%+ of reads** are cacheable (txn status, merchant config, PSP config).
-- Redis cache hit ratio target: **90%+**.
-- Read replicas serve dashboard + recon scans via AOP `@DataSource(SLAVE_DB)` (STAR 7).
-- Master DB only sees: writes + critical reads (fund deduction, idempotency-key existence check).
-
-### 7.3 Write scaling
-
-- Single MySQL master handles ~5K writes/sec on a `db.r5.4xlarge` with NVMe and `innodb_flush_log_at_trx_commit=2`.
-- Below that, **don't shard.** Vertical first (STAR 7 ladder, file 17 CQ6).
-- Past 5K writes/sec or 500GB: shard by `merchant_id`.
-
-### 7.4 Cache patterns by use case
-
-| Cache | Pattern | TTL | Why |
-|---|---|---|---|
-| Idempotency key → response | Write-through | 24h | Must survive process restart |
-| PSP routing config | Refresh-ahead | 5min | Updates rare, freshness matters |
-| Merchant API key → merchant_id | Cache-aside | 15min | Read-heavy, OK to be 15min stale |
-| Txn status (hot read) | Cache-aside with defensive evict at write site | 60s | **STAR 11 lesson — don't trust TTL for correctness** |
-| Rate limit token bucket | Atomic (Lua) | N/A | Just storage, no read-then-write race |
-
-### 7.5 Async vs sync paths
-
-| Path | Sync or async? | Why |
-|---|---|---|
-| Auth + capture | **Sync** (≤ 500ms p99) | Customer is waiting |
-| Webhook delivery to merchant | **Async** | Network may be slow / merchant may be down |
-| Settlement | **Async** (cron-batched) | Daily; no user waiting |
-| Recon | **Async** (cron-batched) | EOD; no user waiting |
-| Refund | **Async** with sync ack | PSP refund APIs are often async themselves |
-| Notification (email/SMS) | **Async** | Best-effort, retry-able |
-| Analytics / audit | **Async** (CDC → Kafka → CH) | Don't add latency to write path |
-
----
-
-## SECTION 8 — SECURITY (PCI-DSS, tokenization, HSM, mTLS, crypto hardening)
-
-### 8.1 The three-layer security stack (anchor: STAR 3)
-
-| Layer | What | Why |
-|---|---|---|
-| **Transport** | TLS 1.3 + mTLS at edge for B2B | Mutual auth; prevents server impersonation |
-| **Auth** | JWT (RS256) for sessions; API key + HMAC for S2S | Per-request signing prevents tampering |
-| **Payload** | PGP encryption for sensitive fields (PII, card data) | Defense in depth — even if TLS terminates upstream |
-
-**Used in production:** the exact GPay term-loan integration that passed Google's security review on first attempt.
-
-### 8.2 PCI-DSS scope
-
-| In scope | Out of scope |
-|---|---|
-| Anything that touches raw PAN | Anything that touches only tokens / last-4 |
-| Card data storage (we don't store PAN) | Tokenized card storage |
-| HSM operations (CVV verify, PIN block) | Tokenization API responses |
-| Logs that might contain PAN (must mask) | Application logs after PAN masking middleware |
-
-**Scope reduction strategy:** **never let raw PAN into our boundary.** PSP returns a network token on first auth; we store token + last-4 + expiry. Subsequent transactions use the token. **Our PCI scope is reduced to the tokenization handler — a tiny, well-audited service.**
-
-### 8.3 Tokenization (RBI mandate, Sep 2022)
-
-- Merchants can no longer store raw card numbers.
-- **Network tokens** via Visa Token Service, MasterCard Digital Enablement, Rupay tokenization.
-- Lifetime: token tied to (PAN, merchant). Same PAN at a different merchant = different token.
-
-### 8.4 HSM-backed crypto
-
-For PIN block, CVV verify, and key wrap:
-- **AWS CloudHSM** (FIPS 140-2 Level 3) or **Thales nShield**.
-- Keys never leave the HSM in plaintext.
-- All sensitive crypto ops go through HSM API.
-
-### 8.5 Bouncy Castle hardening (anchor: STAR 6)
-
-The lesson from the GPay SFTP recon incident applies to every crypto code path in this design:
-
-1. **Static-block registration** so BC loads before any caller (`static { registerBouncyCastleProvider(); }`).
-2. **Verification by actually using the provider** (`MessageDigest.getInstance("MD5", "BC")`) — `getProvider("BC") != null` lies if BC is registered-but-broken.
-3. **Remove-and-re-register fallback** if existing BC is broken.
-
-Applied to: SFTP key parsing (recon), JCE-based AES (payload), HSM signing path, PGP encrypt/decrypt.
-
-### 8.6 Other controls
-
-| Control | What |
-|---|---|
-| **Encryption at rest** | AES-256 for MySQL, S3, RDS snapshots, EBS volumes |
-| **Secret rotation** | Vault dynamic creds; 30-day rotation for static |
-| **Audit log immutability** | Append-only log table + S3 with object lock |
-| **Separation of duties** | ConfigNexus 4-role split (STAR 5) for config + refund approvals over threshold |
-| **Penetration testing** | Annual third-party PT (Synack / Cobalt) |
-| **Bug bounty** | HackerOne for public-facing endpoints |
-
----
-
-## SECTION 9 — RELIABILITY (multi-region, partner failover, failure handling)
-
-### 9.1 Multi-region topology
-
-**Active-active across two AWS regions** (Mumbai `ap-south-1` primary + Hyderabad `ap-south-2` secondary).
-
-- **MySQL** — Group Replication or async with manual failover; replication lag monitored; per-region write authority by merchant shard.
-- **Redis** — Redis Enterprise active-active (CRDTs) or per-region Redis Cluster with no cross-region replication for idempotency keys (region-stickiness instead).
-- **Kafka** — MirrorMaker 2 for cross-region topic replication; consumers prefer local broker.
-- **DNS** — Route 53 weighted routing; health checks every 10s; automatic failover.
-
-### 9.2 Failure scenarios (and what we do)
-
-| Failure | Detection | Action |
-|---|---|---|
-| PSP outage | Circuit breaker open after 5 failures | Failover to next PSP in priority list |
-| MySQL master failover | Replication lag alarm + read replica promotion | ~2 min recovery; idempotency layer + Kafka prevent data loss |
-| Redis primary failure | Sentinel detection | Auto-failover to replica; <30s impact |
-| Kafka broker failure | ZK/KRaft re-election | Producer retry; consumer rebalance |
-| Region outage | Route 53 health check | DNS shift to secondary region in 30-60s |
-| Webhook delivery service down | Kafka consumer lag alarm | Replay from last offset; no lost webhooks |
-| Settlement cron failure | Cron exit non-zero | Re-run idempotently (UNIQUE on `merchant + date`) |
-
-### 9.3 Chaos testing
-
-**Quarterly game-days:**
-- Kill a random pod (Litmus)
-- Block a PSP at the network level
-- Add 500ms latency to MySQL (toxiproxy)
-- Drop a Kafka broker
-- Region failover drill
-
----
-
-## SECTION 10 — OBSERVABILITY
-
-### 10.1 RED method (per service, per PSP)
-
-- **Rate** — requests/sec
-- **Errors** — error rate (4xx + 5xx)
-- **Duration** — p50 / p95 / p99 latency
-
-### 10.2 SLOs
-
-| SLO | Target | Burn-rate alert at |
-|---|---|---|
-| Auth path availability | 99.95% | 2% / 1h budget burn |
-| Auth p99 latency | < 500ms | 5% breach |
-| Webhook delivery p99 | < 5min | 5% breach |
-| Settlement on-time delivery | > 99.5% | Any miss |
-| Recon match rate | > 99% | < 99% for 24h |
-
-### 10.3 Traces, logs, metrics
-
-- **Traces** — OpenTelemetry SDK in every service → OTel collector → Coralogix (your existing investment).
-- **Logs** — structured JSON; PII-masking middleware (mask PAN, CVV, OTP); ship to Coralogix; 7-year retention for compliance subset.
-- **Metrics** — Prometheus + Grafana for infra; service-level metrics via Micrometer → Coralogix.
-
-### 10.4 Alerting tiers
-
-| Tier | Examples | Channel |
-|---|---|---|
-| **P0 / page** | Auth path down, MySQL master unreachable | Phone + Slack + email |
-| **P1 / on-call** | PSP circuit open, settlement failure | Slack + email |
-| **P2 / next-business-day** | Cache hit rate degraded, p99 budget breach | Email + JIRA ticket |
-
----
-
-## SECTION 11 — CROSS-QUESTIONS WITH DETAILED ANSWERS
-
-### CQ1. "Walk me through a UPI collect flow end-to-end."
-
-**Opener:** *"Merchant initiates collect → our gateway hits the PSP → PSP sends collect to NPCI → customer pays from UPI app → callback flows back → state machine fires."*
-
-"Step-by-step:
-
-1. Merchant calls our `POST /v1/payments` with `mode=UPI`, `customer_vpa=name@bank`, idempotency key.
-2. Gateway → auth → rate limit → idempotency check.
-3. Orchestrator creates a `txn` row with `current_stage=CREATED`, returns `txn_id` synchronously.
-4. PspRouter picks UPI PSP based on health + cost (e.g. Razorpay > Cashfree).
-5. PSP handler calls Razorpay UPI collect API; gets back `psp_txn_id` + `expires_in=300s`.
-6. We fire `insertTxnTracker(AUTHORIZATION_PENDING)`. Return `pending` to merchant.
-7. Customer gets a UPI app notification (PSP → NPCI → bank → app).
-8. Customer approves; bank debits; NPCI confirms to PSP; PSP fires our `/v1/webhooks/upi` callback.
-9. Our webhook handler: **always-200 immediately** (STAR 2 pattern), Redisson `RLock` on `txn_id`, persist callback (unique on `psp_event_id` for dedup), then async fire `insertTxnTracker(CAPTURED)`.
-10. State machine fires Kafka event → webhook delivery service → merchant gets HMAC-signed callback within seconds.
-11. If no PSP callback within 2 minutes: status-poll PSP API as fallback; sometimes the webhook is dropped.
-
-**Failure modes covered:** customer-cancellation → PSP fires `FAILED` callback → we fire `insertTxnTracker(FAILED)`. Customer-timeout → PSP fires `EXPIRED` → same path. Bank downtime → PSP retries internally, may return ambiguous status → polling kicks in."
-
----
-
-### CQ2. "How do you ensure idempotency across retries?"
-
-**Opener:** *"Three layers: Redis cached response, Redisson distributed lock, DB unique constraint. Belt-and-suspenders."*
-
-"Caller sends `Idempotency-Key` on every mutating request. Three layers:
-
-1. **Redis cache** — `idem:{merchant_id}:{idempotency_key}` → cached response. Sub-ms lookup. TTL 24h.
-2. **Redisson `RLock`** — serializes concurrent first-runs for the same key across pods.
-3. **DB unique constraint** on `(merchant_id, idempotency_key)` — even if Redis is down, a duplicate insert throws `DataIntegrityViolationException`, which we catch and load the existing record.
-
-This is the exact same pattern as `ANachLogsEntity` + Redisson `RLock` + state-machine guard from the Digio NACH webhook (STAR 2). **Belt-and-suspenders matter** — if you lose Redis you don't lose correctness."
-
----
-
-### CQ3. "Why a state machine for txn lifecycle, not flags?"
-
-**Opener:** *"Auditability, single mutation chokepoint, transition validation, and replayable history. Same reasoning as `dgl-status` (STAR 4)."*
-
-"Three reasons:
-
-1. **Auditability** — `txn_event` is append-only. Compliance auditor asks 'show me the complete timeline of txn_id X' — one query.
-2. **Single mutation chokepoint** — `insertTxnTracker(...)` is the only place state changes. Every other code path calls through it. Triggers (Kafka events), notifications, admin status updates — all happen automatically because they're in one method.
-3. **Transition validation** — `if (currentStage != AUTHORIZED) throw InvalidStateException` is trivial. With flags scattered across columns, you can accidentally `CAPTURED=true` while `REFUNDED=true`.
-
-**Why pragmatic enum + DB audit table, not Spring State Machine** (STAR 4 in the v2 behavioral pack): partner-specific events per stage; Spring SM couples state→action at the framework layer, but our problem needs partner-keyed state→action. The `partnerStageEventConfigMap` pattern (file 05) scales to 15+ partner builders without framework gymnastics."
-
----
-
-### CQ4. "How do you handle a partner outage in the middle of a payment?"
-
-**Opener:** *"Circuit breaker per PSP + routing layer failover + idempotency-keyed retry. Customer sees no disruption."*
-
-"**Detection:** Resilience4j circuit breaker on each PSP handler. Opens after 5 consecutive failures or success rate < 95% over last 100 requests.
-
-**Failover:** when Razorpay's circuit opens, PspRouter automatically picks the next handler in priority (Cashfree, then Juspay). **The retry of the same payment uses the same idempotency key** — if the first attempt actually succeeded at Razorpay and we just didn't see the response, the second attempt at Cashfree could double-charge **without idempotency**. So: idempotency-keyed retries + a reconciliation pass that detects 'we routed to PSP1 but PSP2 also confirmed' as a known anomaly (rare; handled via T+1 recon exception queue).
-
-**Customer experience:** for sync flows, we hold the response for up to 30s while we try alternates; for redirect flows, we re-render with the alternate PSP's redirect URL.
-
-**Recovery:** half-open every 30s; one probe; if successful, close the circuit and resume. **Never** flap-back instantly — wait for 5 successive probes."
-
----
-
-### CQ5. "How do you ensure no double-charge?"
-
-**Opener:** *"Idempotency key from the merchant + idempotency token to the PSP + reconciliation as the final safety net."*
-
-"Three lines of defense:
-
-1. **Merchant idempotency key** — same key returns same response (Section 3.5).
-2. **PSP-side idempotency** — every PSP API call from our system includes our internal `txn_id` as their idempotency token. If our retry hits the PSP twice, they dedup on their side.
-3. **Reconciliation** — daily T+1 file from PSP vs our internal txns. Any mismatch (PSP says 2 txns, we say 1) goes to exception queue. **The recon is the ultimate truth check — if PSP records say we charged twice, we issue automatic refund.**
-
-**The cost of getting this wrong:** the mandate-retry incident (backup STAR 6 in file 16) — same transaction id reused on retry, double-booked mandates, manual refunds for 24 hours. **Idempotency is not optional.**"
-
----
-
-### CQ6. "PCI-DSS scope — what's in scope, what's out?"
-
-**Opener:** *"In scope: anything that touches raw PAN. Out: anything that only touches tokens. Goal is to minimize the in-scope surface."*
-
-"PCI-DSS Level 1 (the strictest, for systems processing > 6M txns/year) requires:
-
-- Quarterly internal scans + annual external pen test by a QSA (Qualified Security Assessor).
-- Network segmentation between in-scope and out-of-scope systems.
-- Encryption at rest + in transit for cardholder data.
-- Access logs retained 1 year (3 months immediately available).
-- Restricted physical + logical access.
-
-**Our scope-reduction strategy:** the **tokenization handler is the only service that ever touches raw PAN**, and only momentarily — receives from the PSP, exchanges for a network token, discards the PAN. Everything else handles tokens. **The other 95% of our services are out of scope.**
-
-Logs that might contain PAN: PII-masking middleware in every service masks before any log write. PAN is replaced with `XXXX-XXXX-XXXX-1234` (last 4 only). Same middleware masks CVV and OTP."
-
----
-
-### CQ7. "How do you handle webhook delivery failures?"
-
-**Opener:** *"Persistent outbox + exponential retry + DLQ + HMAC signing. Six attempts over 31 hours, then DLQ for manual replay."*
-
-"Architecture:
-
-1. **Outbox row** persisted in DB at the same time as state transition (single txn).
-2. **Async delivery service** consumes the outbox, attempts HTTP POST to merchant URL with HMAC signature.
-3. **Exponential backoff** — 1m, 5m, 15m, 1h, 6h, 24h. 6 attempts total.
-4. After 6 failures → **dead-letter queue** (Kafka topic with infinite retention).
-5. **DLQ replay tool** for ops — 'merchant says they missed webhooks from 12pm-4pm, replay this slice.'
-
-**HMAC signing:** `X-Signature: HMAC-SHA256(merchant_secret, payload)`. Merchant verifies on their side. **X-Timestamp + 5-min window prevents replay attacks.**
-
-**One critical detail:** the outbox is in the **same DB transaction** as the state transition. If the state changes but the outbox write fails, both roll back. This is the **outbox pattern** (file 17 CQ10) — avoids dual-write inconsistency."
-
----
-
-### CQ8. "How do you handle a refund when the original PSP is down?"
-
-**Opener:** *"Queue the refund with retry, alert ops if outage exceeds SLA, fall back to manual bank transfer as the last resort."*
-
-"Refunds are async by design — RBI allows 7 business days for refund credit. So a PSP outage isn't catastrophic, but we still need to handle it cleanly:
-
-1. **Refund initiated** → DB state `REFUND_INITIATED`, customer-facing message: 'Refund will reflect in 5-7 business days.'
-2. **PSP API call** → if circuit open, queue in `refund_retry` table with `next_attempt_at = now + 1h`.
-3. **Retry every hour** for up to 72h.
-4. After 72h still open → **ops alert** (P1). Manual investigation.
-5. **Manual fallback** — if PSP unreachable indefinitely (rare; usually < 4 hours), ops can issue manual NEFT/IMPS via our B2B handler. Reconciled against the refund record by `psp_txn_id`.
-
-**The principle:** refunds *will* eventually succeed; we trade time for correctness, not the other way around."
-
----
-
-### CQ9. "How do you shard the txn table?"
-
-**Opener:** *"By `merchant_id` hash. Same merchant = same shard. Routing trivial; cross-shard queries rare."*
-
-"**Threshold:** don't shard until master can't keep up. ~5K writes/sec and 500GB are typical signals.
-
-**Why merchant_id:** every authenticated API request has merchant in the URL or header. Routing is `shard = hash(merchant_id) % N`. Cross-shard joins (rare — only ops/recon) push to ClickHouse via CDC.
-
-**Why not txn_id:** would force every per-merchant report (settlement, dashboard) to fan out across all shards.
-
-**Why not by date:** time-based sharding seems clean but creates a permanent hotspot on the current shard; all writes go to one node.
-
-**Tooling:** Vitess for transparent sharding when we get there. Until then, app-level routing via a `ShardResolver` bean that picks the right `DataSource` per request.
-
-**Audit table partitioning:** `txn_event` is huge (one row per state change). **Partition by `created_at` month** — old partitions archive to S3 + drop cheaply."
-
----
-
-### CQ10. "Why Kafka, not RabbitMQ?"
-
-**Opener:** *"Replayability. When the webhook delivery service comes back from a 4-hour outage, it consumes from where it left off."*
-
-"Three reasons Kafka wins for this workload:
-
-1. **Replay** — RabbitMQ deletes after ack; Kafka retains for days. If a downstream service was down 4 hours, it catches up.
-2. **Per-key ordering** — partition by `txn_id` so all events for one txn are processed in order. RabbitMQ FIFO queues exist but don't scale similarly.
-3. **Throughput** — Kafka handles 100K+ msg/s per broker; RabbitMQ ~50K. Not the bottleneck yet at 2000 RPS, but headroom matters.
-
-**Where RabbitMQ wins:** complex routing (topic exchanges), per-message ack/nack (vs Kafka's offset-based), simpler ops for small teams. **Not our needs here.**"
-
----
-
-### CQ11. "Why MySQL, not Postgres or Cassandra?"
-
-**Opener:** *"MySQL for team familiarity + ecosystem maturity. Postgres is a fine alternative. Cassandra is wrong shape for OLTP."*
-
-"**MySQL vs Postgres:** technically Postgres has nicer JSON support, window functions, and partial indexes. **But India fintech ecosystem is MySQL-heavy** — ProxySQL, orchestrator, Vitess, gh-ost, PT-toolkit all mature on MySQL. Hiring is easier. AOP read-write split (STAR 7) is already proven on MySQL.
-
-**MySQL vs Cassandra:** Cassandra is the wrong shape (file 17 Section 3.3). Money-moving workload needs ACID + joins + ad-hoc queries. Cassandra punishes ad-hoc analytics and forces denormalization per query pattern. **MySQL master + replicas + Redis cache + ES for search beats Cassandra at this scale.**
-
-**The migration we'd consider:** Vitess at ~50K writes/sec or 5TB. Until then, MySQL stays."
-
----
-
-### CQ12. "How do you do recon and what triggers an exception?"
-
-**Opener:** *"Daily file from each PSP, three-way match against our internal ledger. Three buckets: matched, PSP-only, internal-only."*
-
-"Daily SFTP pull from each PSP (anchor: GPay SFTP path, STAR 6). Parser loads into `recon_psp_rows` staging table. Three-way match by `(psp_txn_id, amount, date)`:
-
-| Bucket | What it means | Action |
-|---|---|---|
-| **Matched** | Both sides agree | No action; archive |
-| **PSP_ONLY** | PSP has it, we don't | We missed a webhook; replay from `psp_txn_id` |
-| **INTERNAL_ONLY** | We have it, PSP doesn't | Possible failed-at-PSP-after-our-state-moved; manual investigation |
-
-**Auto-resolve patterns** (configurable): timezone offsets, MDR rounding, T+0 vs T+1 boundary cases. **Manual queue** for everything else; ops works through it before next business day.
-
-**SLO:** > 99% match rate. < 99% for 24h → P2 alert."
-
----
-
-### CQ13. "How do you handle replay attacks?"
-
-**Opener:** *"Two layers: HMAC signature + timestamp window + nonce/idempotency key. Same payload after 5 minutes = rejected."*
-
-"For webhooks we send: `X-Signature: HMAC-SHA256(...)` + `X-Timestamp: epoch_seconds`. Merchant verifies (a) signature matches, (b) `|now - X-Timestamp| < 5 min`, (c) optionally `X-Event-Id` hasn't been seen before (idempotency on their side).
-
-For webhooks we receive: same checks. We persist `psp_event_id` with unique constraint → duplicates rejected at DB level.
-
-For API requests: API key + HMAC over body + `X-Timestamp` header. Replay window 5 min. Each request also has an `Idempotency-Key` we dedup on."
-
----
-
-### CQ14. "How would you scale from 10M/day to 100M/day?"
-
-**Opener:** *"Vertical first, then read replicas exhaustively, then cache aggressively, then shard MySQL, then split mode-handlers, then Kafka partition count, then multi-region active-active."*
-
-"The scaling ladder (same as file 17 CQ6, applied here):
-
-1. **Vertical scaling** — bigger MySQL master, more RAM for buffer pool. Buys 5-10x.
-2. **More read replicas** — 4 replicas instead of 2; route 80%+ of reads off master.
-3. **Cache hit ratio improvement** — go from 90% to 98% on hot reads (PSP config, merchant config).
-4. **Kafka partition increase** — per-topic partitions from 12 to 60; more consumer parallelism.
-5. **Mode-handler scale-out** — UPI handler from 4 pods to 20; bulk of traffic.
-6. **MySQL shard by merchant_id** — Vitess. Past 5K writes/sec.
-7. **Multi-region active-active** — Mumbai + Hyderabad with per-merchant region affinity.
-8. **Compute autoscaling** — HPA on CPU + queue depth.
-
-**What we'd avoid:** rewriting MySQL to Cassandra. Migration cost is months; the underlying access patterns (relational, joins, strict consistency) don't suddenly change at 100M/day."
-
----
-
-### CQ15. "What's your B2B settlement flow?"
-
-**Opener:** *"Daily cron, aggregate by merchant, deduct MDR + GST, initiate NEFT/IMPS to merchant bank, webhook + dashboard report."*
-
-(See Section 3.9 for full details.)
-
----
-
-### CQ16. "How do you handle a partial refund?"
-
-**Opener:** *"Track `refunded_amount` cumulatively; refundable = captured - refunded; allow refund up to refundable. Each partial refund is a separate `refund` row with its own state."*
-
-"Schema: `txn.captured_amount` and `txn.refunded_amount`. `refund` table has `refund_id`, `txn_id`, `amount`, `status`. Multiple `refund` rows per `txn`. Trigger:
-
-```sql
-UPDATE txn
-SET refunded_amount = refunded_amount + :refund_amount
-WHERE txn_id = :txn_id
-  AND captured_amount - refunded_amount >= :refund_amount;
-```
-
-If 0 rows affected → refund amount > refundable; reject the request. **Atomic, no lock needed** — the DB row-level lock handles it (file 18 CQ16, atomic update pattern)."
-
----
-
-### CQ17. "How do you detect fraud in real time?"
-
-**Opener:** *"Rules engine pre-check + risk score from ML model + post-event analysis. Block on rules; flag on score; review on velocity anomalies."*
-
-"Three layers:
-
-1. **Rules engine pre-check** — synchronous, < 50ms. Block on hard rules (IP from blocklist, card BIN from issuer block, amount > merchant limit).
-2. **Risk score from ML model** — synchronous, < 100ms. Score 0-1; > 0.8 → trigger 3DS challenge or block.
-3. **Velocity / pattern analysis** — async via Kafka → Flink. Detect 'same card across 5 merchants in 10 min' or 'IP at 100 txns/hour.' Updates the rules engine + risk model.
-
-**Where this lives:** dedicated `risk-service` called pre-PSP. Latency budget is tight — we can't add 500ms to every txn for fraud check. The async layer handles things that don't need sync answer."
-
----
-
-### CQ18. "Webhook signature verification — what algorithm and why?"
-
-**Opener:** *"HMAC-SHA256 with merchant secret + timestamp. Symmetric, fast, RBI-acceptable, well-understood."*
-
-"`X-Signature: HMAC-SHA256(merchant_secret, X-Timestamp + '.' + payload)`. Merchant verifies on their side. Why this and not RSA / ECDSA:
-
-| | HMAC-SHA256 | RSA / ECDSA |
-|---|---|---|
-| Speed | < 1ms | ~10ms |
-| Key management | Shared secret per merchant | Public-private keypair |
-| Key rotation | Trivial | Requires JWKS / discovery |
-| Crypto strength | Same security level | Same |
-| Standard | RFC 2104, HMAC-SHA256 | More complex |
-
-**For higher-trust integrations** (bank-grade) we offer RSA-PSS as an option. Default is HMAC because rotation + verification are simpler."
-
----
-
-### CQ19. "Card tokenization — what changed post RBI mandate 2022?"
-
-**Opener:** *"Merchants can no longer store PAN; network tokens replace card numbers. PCI scope shrinks dramatically."*
-
-"Sep 30, 2022 RBI mandate: merchants and aggregators cannot store CoF (Card-on-File) data — only the **issuer or card network** can. Acquirers / PSPs implement Card-on-File Tokenization (CoFT):
-
-- First txn: customer enters PAN. PSP calls network (Visa Token Service / MDES) to mint a **network token** unique to (PAN, merchant). PSP returns token to us; we store token + last-4 + expiry + brand.
-- Subsequent txns: we send token to PSP, PSP detokenizes at network, charges card.
-
-**What we get:** PCI scope reduction (95% of services don't see PAN); customer doesn't re-enter card every time; PAN compromise at one merchant doesn't expose others.
-
-**What we lose:** can't migrate tokens across PSPs (token is tied to PSP relationship). Re-token if we switch PSPs."
-
----
-
-### CQ20. "How does 3DS 2.0 differ from 1.0?"
-
-**Opener:** *"3DS 2.0 is risk-based, mobile-friendly, lower friction. ~80% of txns are frictionless; 1.0 always challenged."*
-
-"3DS 1.0: every txn redirected customer to issuer page for OTP. High friction; mobile UX terrible; ~30% drop-off.
-
-3DS 2.0: issuer evaluates risk silently based on 100+ data points (device, geo, velocity, BIN-merchant combination). **Frictionless flow** for ~80% of txns. Challenge flow (OTP/biometric) only for the rest. Native SDK on mobile (no redirect). Strong Customer Authentication compliant.
-
-**Adoption:** mandatory in India for cross-border + high-risk; many merchants opt in for everything because the SR (success rate) is higher."
-
----
-
-### CQ21. "NEFT vs RTGS vs IMPS — when to use which?"
-
-**Opener:** *"IMPS for ≤ ₹5L real-time; NEFT for batched no-limit; RTGS for ≥ ₹2L real-time."*
-
-(See Section 3.8.6 table.)
-
----
-
-### CQ22. "How do you handle a dispute / chargeback?"
-
-**Opener:** *"Multi-stage lifecycle — retrieval, chargeback, pre-arb, arbitration. Reverse settlement immediately; collect evidence; let network decide."*
-
-(See Section 3.11 dispute table.)
-
----
-
-### CQ23. "What's your strategy for handling EOD spikes?"
-
-**Opener:** *"Pre-scale ahead of cycle, batch-friendly settlement design, async recon, partition Kafka topics for parallel processing."*
-
-"EOD = settlement cron at 6 AM IST + recon ingestion. **Two cycles, both batch-friendly.**
-
-- **Pre-scale**: KEDA-based autoscale on Kafka consumer lag; pods scale from 8 to 32 at 5:45 AM, scale back at 8 AM.
-- **Settlement batching**: per-merchant grouping; per-merchant txn count is bounded (< 100K) so single pod can handle one merchant in a few seconds. Parallelize across merchants.
-- **Recon files**: ingest in parallel (one Kafka consumer per PSP file); shard by `psp_txn_id` hash.
-- **Read traffic during EOD**: dashboard reads spike (merchants checking settlement); already handled by read-replica routing (STAR 7); add a 4th replica during EOD."
-
----
-
-### CQ24. "How do you do canary releases for a payment service?"
-
-**Opener:** *"Traffic-percentage canary at the API gateway level + per-merchant pinning for low-risk testing. Roll back on metric breach."*
-
-"Three-stage canary:
-
-1. **Internal traffic** — synthetic txns from a test merchant, 100% of canary capacity. 10 minutes.
-2. **Per-merchant pin** — flag a few small low-risk merchants to canary via merchant_id-based routing rule. 1 hour.
-3. **Traffic-percentage** — 5% → 25% → 50% → 100% over 4 hours, with metric guard rails:
-   - p99 latency increase > 20% → auto-rollback
-   - Error rate > baseline + 0.5% → auto-rollback
-   - PSP success rate drop > 1% → auto-rollback
-
-**Tooling:** Argo Rollouts on Kubernetes; metrics from Coralogix; automatic rollback via Argo's analysis templates. **What I'd avoid:** instant 100% rollout. Even with great testing, prod has surprises (file 16 STAR 6 — the BC SFTP failure)."
-
----
-
-### CQ25. "How would you build a 'split payment' flow (one txn → multiple beneficiaries)?"
-
-**Opener:** *"One inbound txn, multiple settlement entries. Atomic at the settlement layer; the inbound charge is a single PSP call."*
-
-"Architecture (anchor: STAR 8 split payment engine):
-
-1. **Inbound charge** is a single txn — customer pays X to a marketplace.
-2. **Settlement-side split** — when the txn moves to `CAPTURED`, we expand into N `settlement_item` rows per the merchant's split config (e.g., 80% to seller, 15% to marketplace, 5% to platform).
-3. **Atomic split** — all N rows insert in one DB txn. If a beneficiary fails validation (Penny Drop failed), the entire split rolls back; merchant resolves manually.
-4. **Reconciliation** — recon checks `sum(settlement_item.amount) == txn.amount` per source txn. Mismatch → exception.
-
-**What I'd avoid:** splitting at the inbound charge level (multiple PSP calls). Too many edge cases (partial PSP success). Keep PSP simple; split downstream where we control consistency."
+**Avoid:** doing the split at the inbound charge layer with multiple PSP calls. Edge cases multiply (PSP1 succeeds, PSP2 fails, partial state). Keep the inbound simple; split at the controllable layer.
 
 ---
 
 ## SECTION 12 — RAPID-FIRE Q BANK (30 one-liners)
 
-1. **"Default settlement cycle?"** → T+1 morning IST.
-2. **"What's MDR?"** → Merchant Discount Rate; ~2% for cards, 0% for UPI (mandated by govt).
-3. **"What's UTR?"** → Unique Transaction Reference; bank-generated identifier for inter-bank transfers.
-4. **"What's ARN?"** → Acquirer Reference Number; card network identifier for tracking.
-5. **"What's a nodal account?"** → RBI-mandated escrow account holding settlement funds; can't co-mingle with company funds.
-6. **"What's Penny Drop?"** → Send ₹1 to verify beneficiary account + name match.
-7. **"3DS bypass for which txns?"** → ≤ ₹15K via RBI 'small value e-mandate' exemption; some recurring AutoPay.
-8. **"What's a chargeback liability shift?"** → 3DS-authenticated txns shift liability to issuer; non-3DS, liability stays with merchant.
-9. **"What's CIN?"** → Customer Identification Number; bank's internal customer ID.
-10. **"What's a sub-merchant?"** → Aggregator's merchants (e.g. Razorpay's customers); each gets a sub-merchant ID.
-11. **"What's a payment intent?"** → Stripe-popularized term; represents a "I intend to charge X" before customer actually pays.
-12. **"What's setup_future_usage?"** → Save card on file for future merchant-initiated charges (subscriptions).
-13. **"What's strong customer authentication (SCA)?"** → EU PSD2 / India RBI requirement: 2 of 3 factors (knowledge + possession + inherence).
-14. **"What's a hosted checkout?"** → Merchant redirects customer to PSP-hosted page (reduces PCI scope).
-15. **"What's a Pay-By-Link?"** → Async payment flow: PSP generates link, merchant shares with customer.
-16. **"What's an instant settlement?"** → T+0 (same day); premium feature with higher MDR.
-17. **"What's a reverse charge for refund?"** → Settlement deduction when refund is processed.
-18. **"What's a void vs refund?"** → Void before capture (no $ moved); refund after capture (return moved $).
-19. **"What's a webhook signature?"** → HMAC of payload + timestamp; receiver verifies authenticity.
-20. **"What's a chargeback fee?"** → Network-imposed fee on merchant when chargeback received; ~₹500-2000.
-21. **"What's a card-not-present (CNP)?"** → Online txn; higher fraud risk; 3DS recommended.
-22. **"What's an EMV chip?"** → Embedded chip on physical card; cryptographic auth; card-present only.
-23. **"What's a BIN?"** → Bank Identification Number; first 6-8 digits of PAN; identifies issuer.
-24. **"What's a Pay-Out vs Pay-In?"** → Out = we send money to merchant/customer; In = we collect.
-25. **"What's escrow time?"** → Hold period between capture and merchant settlement; standard T+1.
-26. **"What's PCI Level 1?"** → Highest tier; > 6M txns/year; quarterly scans + annual QSA audit.
-27. **"What's KYC for merchants?"** → Same as for customers but business-grade (GST, PAN, bank proof, owners, MoA).
-28. **"What's e-mandate?"** → RBI recurring payment authorization; UPI AutoPay + card EMI use this.
-29. **"What's NSDL TIN?"** → Tax info system; mandatory PAN linkage for high-value txns.
-30. **"What's a soft decline vs hard decline?"** → Soft = retry-able (insufficient funds, network); hard = don't retry (card blocked, fraud).
+1. **MDR?** → Merchant Discount Rate; fee charged by acquirer for processing.
+2. **UTR?** → Unique Transaction Reference; bank-generated for inter-bank transfers.
+3. **ARN?** → Acquirer Reference Number; card-network identifier.
+4. **BIN?** → Bank Identification Number; first 6-8 digits of PAN; identifies issuer.
+5. **CoF?** → Card-on-File; storing card details for later use; now must be tokenized in India.
+6. **PCI Level 1?** → Highest tier (> 6M card txns/year); quarterly scans + annual QSA audit.
+7. **3DS frictionless?** → Issuer silently scores risk; no OTP for ~80% of txns.
+8. **3DS challenge?** → OTP / biometric prompt; ~20% of txns; mandatory for high-risk.
+9. **Tokenization?** → Replace PAN with network token; reduces PCI scope.
+10. **Nodal account?** → Regulator-mandated escrow account; cannot co-mingle with company funds.
+11. **Penny-drop?** → Send minimal amount to verify beneficiary name match before bulk payouts.
+12. **Sub-merchant?** → Aggregator's merchants; each gets a unique sub-merchant ID.
+13. **Payment intent?** → Stripe-style abstraction representing "I intend to charge X".
+14. **Setup-for-future-usage?** → Save card on file for merchant-initiated charges (subscriptions).
+15. **SCA?** → Strong Customer Authentication; PSD2 (EU); two of three factors.
+16. **Hosted checkout?** → PSP-hosted page; keeps merchant out of PCI scope.
+17. **Pay-by-link?** → Async link sent to customer; pay any time before expiry.
+18. **T+0 vs T+1 settlement?** → Same-day vs next-day payout to merchant.
+19. **Void vs refund?** → Void = cancel pre-capture (no money moved); refund = return captured money.
+20. **CNP vs CP?** → Card-not-present (online) vs card-present (in-store); CNP has higher fraud risk.
+21. **EMV chip?** → Smartcard chip on physical card; card-present only.
+22. **Pay-In vs Pay-Out?** → Collect from customer vs disburse to merchant/beneficiary.
+23. **Escrow period?** → Hold between capture and settlement; usually T+1.
+24. **Settlement reserve?** → % of volume held by gateway for chargeback exposure; merchant-tier-specific.
+25. **Rolling reserve?** → Reserve released over time (e.g., 5% held for 90 days).
+26. **KYC?** → Know-Your-Customer; identity + risk verification at onboarding.
+27. **KYB?** → Know-Your-Business; merchant identity + ownership + UBO verification.
+28. **Mandate?** → Pre-authorization for recurring debits (UPI AutoPay, e-NACH, ACH debit).
+29. **Soft decline vs hard decline?** → Soft = retry-able (insufficient funds); hard = no retry (block, fraud).
+30. **AOV?** → Average Order Value; key risk-tiering input.
 
 ---
 
-## SECTION 13 — REAL ANCHOR STORIES
+## SECTION 13 — TRADE-OFFS TO STATE OUT LOUD
 
-### 13.1 "Tell me about a payment system you've worked on"
+Senior interviewers love these. Mention them proactively.
 
-> Lead with the lending platform; bridge to the gateway design.
-
-"At PayU I worked on the lending platform — `dgl-services` for orchestration, `dgl-status` for state machine + trigger dispatch, NACH service for mandate management. **The payment-gateway-shaped piece** was the disbursal + repayment side: routing per partner via factories (`AutoDisbursalFactory`), state-machine-driven transitions (`insertApplicationTracker`), Redisson-locked webhook intake from Digio (STAR 2), GPay settlement via SFTP recon (STAR 6). All the patterns you'd see in a payment gateway HLD — idempotency, state machine, partner routing, recon, multi-layer security — I've built end-to-end in this domain."
-
-### 13.2 "Tell me about a tricky payment integration"
-
-> GPay 3-layer security (STAR 3) + Bouncy Castle SFTP recovery (STAR 6).
-
-"The Google Pay term-loan integration. Three-layer security stack — JWT + PGP + TLS 1.3 mTLS — passed Google's security review on first attempt. **Then the deployment surprise:** recon SFTP upload silently failed in prod after working in UAT for weeks, because Bouncy Castle wasn't on the runtime classpath despite being in pom.xml. The defensive pattern that came out of it — static-block registration + verify-by-use + remove-and-re-register fallback — is now applied to every crypto path in my designs."
-
-### 13.3 "Tell me about a payment bug you debugged"
-
-> Meesho auto-disbursal cache bug (STAR 11).
-
-"We rolled out auto-disbursal for Meesho via `AutoDisbursalFactory`. Soon after, ~12 loans fired against pre-update eligibility state — stale `@Cacheable` `ApplicationBean`. Root cause: TTL was being treated as a coherence mechanism when it's only an availability one. Fix: defensive `cacheEvictByKey.evictApplicationCache` at the eligibility entry point + write-site eviction hygiene + idempotency check at the factory boundary. **The discipline that came out of it: TTL is availability, not correctness.** That principle reshapes how I think about cache layers in every system design now."
-
-### 13.4 "Design a payment gateway like Razorpay in 30 mins"
-
-> The whole file. Use Sections 0 → 2 → 5 → 6 → 7 in that order.
+| Choice | Wins | Loses |
+|---|---|---|
+| **Stateless services + Postgres OLTP** | Simple, well-understood, ACID | Single point of write contention until sharded |
+| **Kafka for event spine** | Replay, ordering, throughput | Ops complexity; consumer offset management |
+| **Idempotency everywhere** | Safe retries; correctness | Storage + lock overhead |
+| **Double-entry ledger** | Provable balance correctness | Extra writes per txn (2-4 postings) |
+| **Multi-region active-active** | Best latency + RTO | Replication topology, conflict resolution |
+| **Tokenization for PCI scope reduction** | Smaller audit surface | PSP-bound tokens; switching PSP cost |
+| **Network tokens (post RBI 2022)** | Compliance, security | Re-tokenization on PSP switch |
+| **Smart routing** | Higher SR, lower cost | Routing logic complexity; observability burden |
+| **Strict state machine** | Compile-time safety | Adding states requires migration discipline |
+| **Outbox pattern** | Atomic state-change + event | Extra table, extra worker |
+| **CQRS + CDC** | Read scale, OLAP separation | Eventual consistency between OLTP and read store |
+| **Synchronous risk** | Block fraud at the door | Adds ~100 ms latency |
+| **Asynchronous webhook delivery** | Resilient; merchant-tolerant | Delayed merchant-side reaction |
 
 ---
 
-## SECTION 14 — FINAL CHECKLIST (the night before)
+## SECTION 14 — FINAL CHECKLIST
 
-- Read Sections 0, 1, 2 word-for-word — they're your opener if asked to design a gateway.
-- Memorize the **HLD mermaid** (Section 2.1) and be ready to draw it on a whiteboard.
-- Memorize the **middleware picks table** (Section 5.1) — every cell is a potential "why this" cross-question.
-- Drill **CQ1, CQ2, CQ3, CQ4, CQ5, CQ6, CQ7, CQ10, CQ11, CQ14** — the most likely interview questions.
-- Pre-load the **3 anchor stories** (Section 13) — match story to question, don't hesitate.
-- Glance at **rapid-fire Q bank** — should be reflexive.
-- Cross-reference with **file 14** (Airtel top-5 system design) if the interview is Airtel-specific.
-- Cross-reference with **file 18** (locking) and **file 17** (SQL vs NoSQL) if the interview drills into middleware.
-- Cross-reference with **file 20** (Redis deep pack) if the interview drills into caching.
-- Close this file. Sleep.
+For an interview-grade design pitch:
 
-> **The senior-IC marker:** when asked to design a payment gateway, don't just rattle off components. **Frame the workload first** (B2B vs B2C, modes, scale, NFRs), **propose with reasoning** (Section 4 decision framework from file 17), **name what you'd avoid** (Cassandra for OLTP, dual-writes, RabbitMQ for event spine). The pattern is the same in every system-design round — *decide correctly out loud*.
+- Lead with the **30-second pitch** (Section 0). Don't dive into components first.
+- Frame requirements: **functional + NFR + capacity math**. State out loud.
+- Draw the **HLD diagram** (Section 2.1). Name the 9 layers.
+- Walk the **happy path** (Section 2.2) in 14 steps. Don't skip.
+- For each component, say **what / why / how / MNC reality**.
+- Use **canonical patterns** by name: idempotency, outbox, saga, state machine, circuit breaker, bulkhead, CQRS, CDC, double-entry ledger, tokenization.
+- Pick **middleware with justification** (Section 5). Every cell is a potential follow-up.
+- Mention **trade-offs proactively** (Section 13).
+- Cover **security + compliance** at PCI-DSS Level 1 (Section 8).
+- Cover **reliability + multi-region + DR** (Section 9).
+- Cover **observability + SLOs** (Section 10).
+- Close with **scaling ladder** (Section 7.1) — show you know where the architecture goes next.
+
+**The senior-IC marker:** when asked to design a payment gateway, **don't list components.** Frame the workload, propose with reasoning, name what you'd avoid (Cassandra for OLTP, dual-writes, no idempotency, stored balances, raw PAN in logs). Decide correctly out loud.
